@@ -15,9 +15,9 @@
   --protein: #38bdf8;   /* blue */
   --carbs: #fbbf24;     /* amber */
   --fat: #8b5cf6;       /* purple */
-  --sodium: #f87171;    /* red */
-  --fiber: #a78bfa;     /* purple */
-  --sugar: #fb923c;     /* orange */
+  --sodium: #22c55e;    /* green */
+  --fiber: #facc15;     /* yellow */
+  --sugar: #ec4899;     /* pink */
   --weight: #38bdf8;
   --waist: #a78bfa;
 
@@ -51,9 +51,9 @@
     --protein: #0ea5e9;
     --carbs: #d97706;
     --fat: #6d28d9;
-    --sodium: #dc2626;
-    --fiber: #7c3aed;
-    --sugar: #ea580c;
+    --sodium: #16a34a;
+    --fiber: #ca8a04;
+    --sugar: #db2777;
     --weight: #0ea5e9;
     --waist: #7c3aed;
   }
@@ -285,9 +285,12 @@ input, textarea, select { outline: none; }
 }
 .list-item:active { border-color: var(--line); }
 .list-item .body { flex: 1; min-width: 0; }
-.list-item .name { font-weight: 600; font-size: 14.5px; }
-.list-item .meta { font-size: 12px; color: var(--text-faint); }
+.list-item .name { font-weight: 600; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.list-item .meta { font-size: 12px; color: var(--text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .list-item .right { color: var(--text-faint); font-size: 13px; }
+.list-item > svg { width: 20px; height: 20px; flex: none; }
+.qty-mini { width: 48px; flex: none; text-align: center; background: var(--bg-elev); border: 1px solid var(--line); border-radius: 9px; padding: 9px 4px; color: var(--text); font-size: 15px; }
+.btn.add { flex: none; padding: 9px 14px; border-radius: 9px; font-size: 13.5px; }
 
 /* ---------- Mini calendar (copy targets) ---------- */
 .cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }

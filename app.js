@@ -111,9 +111,22 @@ function openSheet(title, bodyHTML, footHTML, headActions) {
   back.addEventListener('click', (e) => { if (e.target === back) closeSheet(back); });
   back.querySelector('[data-close]').onclick = () => closeSheet(back);
   $sheetHost.appendChild(back);
+  sheetStack.push(back);
   return back;
 }
-function closeSheet(back) { back.remove(); }
+function closeSheet(back) { back.remove(); const i = sheetStack.indexOf(back); if (i >= 0) sheetStack.splice(i, 1); }
+
+// ---- Android / browser back: close the top modal, else step back a tab, else exit ----
+const sheetStack = [];
+const tabHistory = [];
+function initBackButton() {
+  try { history.pushState({ mp: 1 }, ''); } catch {}
+  window.addEventListener('popstate', () => {
+    if (sheetStack.length) { sheetStack.pop().remove(); try { history.pushState({ mp: 1 }, ''); } catch {} return; }
+    if (tabHistory.length) { S.tab = tabHistory.pop(); S.selection.clear(); render(); try { history.pushState({ mp: 1 }, ''); } catch {} return; }
+    // nothing left to close — let the next back actually leave the app
+  });
+}
 
 // ---------------- Render ----------------
 async function render() {
@@ -466,6 +479,8 @@ async function subLibrary(host, back) {
     list.innerHTML = filtered.map((f) => `<div class="list-item" data-fid="${f.id}" style="margin-bottom:8px">
       <div class="body"><div class="name">${esc(f.name)}${f.brand ? ` · <span class="faint">${esc(f.brand)}</span>` : ''}</div>
         <div class="meta">${f.per.kcal} cal · ${esc(f.unit)}</div></div>
+      <input class="qty-mini" data-qty inputmode="decimal" value="1">
+      <button class="btn primary add" data-add>Add</button>
       <button class="icon-btn" data-del="${f.id}">${svg('trash')}</button></div>`).join('');
   };
   draw();
@@ -474,9 +489,10 @@ async function subLibrary(host, back) {
   list.addEventListener('click', async (e) => {
     const del = e.target.closest('[data-del]');
     if (del) { await DB.deleteFood(del.dataset.del); const i = foods.findIndex((f) => f.id === del.dataset.del); if (i >= 0) foods.splice(i, 1); draw(host.querySelector('#libsearch').value); return; }
-    const item = e.target.closest('[data-fid]'); if (!item) return;
-    const f = foods.find((x) => x.id === item.dataset.fid);
-    await addEntry({ name: f.name, unit: f.unit, qty: 1, per: f.per, foodId: f.id });
+    const add = e.target.closest('[data-add]'); if (!add) return;
+    const row = add.closest('[data-fid]'); const f = foods.find((x) => x.id === row.dataset.fid);
+    const qty = Number(row.querySelector('[data-qty]').value) || 1;
+    await addEntry({ name: f.name, unit: f.unit, qty, per: f.per, foodId: f.id });
     closeSheet(back);
   });
 }
@@ -494,11 +510,16 @@ function subSearch(host) {
         if (!found.length) { results.innerHTML = `<div class="empty">No results.</div>`; return; }
         results.innerHTML = found.map((f, i) => `<div class="list-item" data-i="${i}" style="margin-bottom:8px">
           <div class="body"><div class="name">${esc(f.name)}${f.brand ? ` · <span class="faint">${esc(f.brand)}</span>` : ''}</div>
-            <div class="meta">${f.per.kcal} cal · ${esc(f.unit)}</div></div>${svg('plus')}</div>`).join('');
-        results.querySelectorAll('[data-i]').forEach((el) => el.onclick = async () => {
-          const f = found[Number(el.dataset.i)];
-          await addEntry({ name: f.name, unit: f.unit, qty: 1, per: f.per, brand: f.brand, barcode: f.barcode });
-          el.style.opacity = 0.4;
+            <div class="meta">${f.per.kcal} cal · ${esc(f.unit)}</div></div>
+          <input class="qty-mini" data-qty inputmode="decimal" value="1">
+          <button class="btn primary add" data-add>Add</button></div>`).join('');
+        results.querySelectorAll('[data-i]').forEach((el) => {
+          el.querySelector('[data-add]').onclick = async () => {
+            const f = found[Number(el.dataset.i)];
+            const qty = Number(el.querySelector('[data-qty]').value) || 1;
+            await addEntry({ name: f.name, unit: f.unit, qty, per: f.per, brand: f.brand, barcode: f.barcode });
+            el.querySelector('[data-add]').textContent = 'Added';
+          };
         });
       } catch { results.innerHTML = `<div class="empty">Search failed. Check your connection.</div>`; }
     }, 450);
@@ -517,10 +538,12 @@ async function subBarcode(host, back) {
     try {
       const f = await lookupBarcode(code);
       if (!f) { result.innerHTML = `<div class="empty">Not found (${esc(code)}). Add it manually instead.</div>`; return; }
-      result.innerHTML = `<div class="list-item"><div class="body"><div class="name">${esc(f.name)}</div><div class="meta">${f.per.kcal} cal · ${esc(f.unit)}</div></div></div>
+      result.innerHTML = `<div class="list-item"><div class="body"><div class="name">${esc(f.name)}</div><div class="meta">${f.per.kcal} cal · ${esc(f.unit)}</div></div>
+        <input class="qty-mini" id="bqty" inputmode="decimal" value="1"></div>
         <button class="btn primary block" id="badd" style="margin-top:10px">Add</button>`;
       result.querySelector('#badd').onclick = async () => {
-        await addEntry({ name: f.name, unit: f.unit, qty: 1, per: f.per, brand: f.brand, barcode: f.barcode }); closeSheet(back);
+        const qty = Number(result.querySelector('#bqty').value) || 1;
+        await addEntry({ name: f.name, unit: f.unit, qty, per: f.per, brand: f.brand, barcode: f.barcode }); closeSheet(back);
       };
     } catch { result.innerHTML = `<div class="empty">Lookup failed.</div>`; }
   }
@@ -990,7 +1013,7 @@ document.addEventListener('click', async (e) => {
   const t = e.target.closest('[data-act]'); if (!t) return;
   const act = t.dataset.act;
   switch (act) {
-    case 'tab': S.tab = t.dataset.tab; S.selection.clear(); render(); break;
+    case 'tab': if (t.dataset.tab !== S.tab) tabHistory.push(S.tab); S.tab = t.dataset.tab; S.selection.clear(); render(); break;
     case 'settings': openSettings(); break;
     case 'chat': openChat(); break;
     case 'date-prev': S.date = addDays(S.date, -1); S.selection.clear(); render(); break;
@@ -1056,4 +1079,5 @@ function saveUI() {
 
 // ---------------- Boot ----------------
 loadUI();
+initBackButton();
 (async () => { try { S.chat = await DB.getChat(); } catch {} render(); })();
