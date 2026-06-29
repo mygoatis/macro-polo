@@ -23,8 +23,24 @@
   <script type="module" src="app.js"></script>
   <script>
     if ('serviceWorker' in navigator) {
+      let refreshing = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (refreshing) return; refreshing = true; location.reload();
+      });
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('sw.js').catch(() => {});
+        navigator.serviceWorker.register('sw.js').then((reg) => {
+          reg.update();
+          reg.addEventListener('updatefound', () => {
+            const sw = reg.installing;
+            if (sw) sw.addEventListener('statechange', () => {
+              if (sw.state === 'installed' && navigator.serviceWorker.controller) sw.postMessage('skip-waiting');
+            });
+          });
+        }).catch(() => {});
+        // check for updates whenever the app regains focus
+        document.addEventListener('visibilitychange', () => {
+          if (!document.hidden) navigator.serviceWorker.getRegistration().then((r) => r && r.update());
+        });
       });
     }
   </script>

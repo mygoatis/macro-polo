@@ -1,4 +1,5 @@
 // app.js — Macro Polo main controller.
+const APP_VERSION = 'v22';
 import * as DB from './db.js';
 import { lineChart } from './charts.js';
 import * as AI from './ai.js';
@@ -137,7 +138,8 @@ function initBackButton() {
 }
 
 // ---------------- Delight animations ----------------
-const REDUCE = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+let animOn = true;       // animations enabled (user setting, default on)
+function setAnim(on) { animOn = !!on; document.body.classList.toggle('anim', animOn); }
 let foodPrev = null;     // previous food totals (for count-up)
 let foodAnim = null;     // animation payload for the food afterRender hook
 let enterEntryId = null; // newly added entry id to animate in
@@ -146,7 +148,7 @@ let dateDir = 0;         // -1 = previous day, +1 = next day
 function haptic(ms) { try { if (navigator.vibrate) navigator.vibrate(ms || 8); } catch {} }
 function countUp(el, to, from) {
   if (!el) return; to = Math.round(to || 0); from = Math.round(from || 0);
-  if (REDUCE || from === to) { el.textContent = to; return; }
+  if (!animOn || from === to) { el.textContent = to; return; }
   const dur = 450, t0 = performance.now();
   (function step(t) {
     const p = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - p, 3);
@@ -243,7 +245,7 @@ async function renderFood() {
 
   // decide whether to animate (only when the day's totals actually changed)
   const changed = !foodPrev || NUTRIENTS.some((k) => K(foodPrev[k]) !== K(totals[k]));
-  const animate = !REDUCE && changed;
+  const animate = animOn && changed;
   foodAnim = { animate, totals, prev: foodPrev || {} };
   foodPrev = totals;
   const enterId = enterEntryId; enterEntryId = null;
@@ -1038,6 +1040,8 @@ async function openSettings() {
       <div class="field"><label>Weight</label><select class="select" id="setwu"><option ${s.units.weight === 'lb' ? 'selected' : ''}>lb</option><option ${s.units.weight === 'kg' ? 'selected' : ''}>kg</option></select></div>
       <div class="field"><label>Length</label><select class="select" id="setlu"><option ${s.units.length === 'in' ? 'selected' : ''}>in</option><option ${s.units.length === 'cm' ? 'selected' : ''}>cm</option></select></div>
     </div>
+    <label class="row-between" style="margin-top:14px"><span>Animations</span>
+      <input type="checkbox" id="setanim" ${s.animations !== false ? 'checked' : ''} style="width:22px;height:22px;accent-color:var(--cal)"></label>
     <div class="section-title" style="margin-top:14px">Data</div>
     <div class="grid-2">
       <button class="btn sm" data-act="export-json">Export JSON</button>
@@ -1046,12 +1050,14 @@ async function openSettings() {
       <button class="btn sm" id="setinstall">Install app</button>
     </div>
     <input type="file" id="importfile" accept="application/json,.json" style="display:none">
-    <div class="faint center" style="font-size:12px;margin-top:14px">Macro Polo · all data stays on this device</div>
+    <div class="faint center" style="font-size:12px;margin-top:14px">Macro Polo ${APP_VERSION} · all data stays on this device</div>
   `, `<button class="btn ghost" data-close-foot>Cancel</button><button class="btn primary" id="setsave">Save</button>`);
   back.querySelector('#setsave').onclick = async () => {
     s.apiKey = back.querySelector('#setkey').value.trim(); s.model = back.querySelector('#setmodel').value;
     s.fdcKey = back.querySelector('#setfdc').value.trim();
     s.units.weight = back.querySelector('#setwu').value; s.units.length = back.querySelector('#setlu').value;
+    s.animations = back.querySelector('#setanim').checked;
+    setAnim(s.animations);
     await DB.saveSettings(s); S.settings = await DB.getSettings(); closeSheet(back); toast('Settings saved'); render();
   };
   back.querySelector('[data-close-foot]').onclick = () => closeSheet(back);
@@ -1157,7 +1163,7 @@ async function saveBodyQuick() {
   const cur = (await DB.getBody(S.date)) || { date: S.date };
   await DB.putBody({ ...cur, date: S.date, weight: w === '' ? null : Number(w), waist: s === '' ? null : Number(s) });
   const btn = document.querySelector('[data-act="body-save"]');
-  if (btn && !REDUCE) { btn.classList.remove('btn-pop'); void btn.offsetWidth; btn.classList.add('btn-pop'); }
+  if (btn && animOn) { btn.classList.remove('btn-pop'); void btn.offsetWidth; btn.classList.add('btn-pop'); }
   haptic(10); toast('Saved'); render();
 }
 function setBodyRange(r) { S.body.mode = r; if (r === 'custom' && !S.body.from) { S.body.from = addDays(todayStr(), -30); S.body.to = todayStr(); } render(); }
@@ -1180,6 +1186,7 @@ loadUI();
 initBackButton();
 (async () => {
   S.settings = await DB.getSettings();
+  setAnim(S.settings.animations !== false);
   try { S.chat = await DB.getChat(); } catch {}
   try { await backfillLibrary(); } catch {}
   render();
