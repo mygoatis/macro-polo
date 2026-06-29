@@ -101,8 +101,8 @@ function toast(msg, undoFn) {
   toastTimer = setTimeout(() => t.remove(), undoFn ? 5000 : 2200);
 }
 
-function openSheet(title, bodyHTML, footHTML, headActions) {
-  const back = node(`<div class="sheet-backdrop"><div class="sheet">
+function openSheet(title, bodyHTML, footHTML, headActions, opts = {}) {
+  const back = node(`<div class="sheet-backdrop"><div class="sheet${opts.full ? ' full' : ''}">
     <div class="sheet-head"><div class="grip"></div><h2>${esc(title)}</h2>
       ${headActions || ''}<button class="icon-btn" data-close>${svg('x')}</button></div>
     <div class="sheet-body">${bodyHTML}</div>
@@ -427,6 +427,7 @@ async function addEntry({ name, unit, qty, per, foodId, brand, barcode }) {
 
 // Every logged food becomes a reusable library item (deduped by name + unit).
 async function ensureLibrary({ name, unit, per, foodId, brand, barcode }) {
+  if (!name) return;
   const foods = await DB.getFoods();
   let f = foodId ? foods.find((x) => x.id === foodId) : null;
   if (!f) f = foods.find((x) => x.nameLower === (name || '').toLowerCase() && (x.unit || '') === (unit || ''));
@@ -434,11 +435,33 @@ async function ensureLibrary({ name, unit, per, foodId, brand, barcode }) {
   else await DB.putFood({ id: DB.uid(), name, unit, per, brand, barcode, useCount: 1, lastUsed: Date.now() });
 }
 
+// One-time: seed the library from previously-logged real foods (skip MFP day summaries).
+const LIB_SKIP = new Set(['regular', 'irregular', 'snacks', 'logged', 'breakfast', 'lunch', 'dinner']);
+async function backfillLibrary() {
+  if (S.settings.libraryBackfilled) return;
+  const [entries, foods] = [await DB.getAllEntries(), await DB.getFoods()];
+  const have = new Set(foods.map((f) => (f.nameLower || '') + '|' + (f.unit || '')));
+  const seen = new Map();
+  for (const e of entries) {
+    if (!e.name || (e.unit || '') === 'day') continue;          // skip MFP daily summaries
+    if (LIB_SKIP.has(e.name.toLowerCase())) continue;
+    const key = e.name.toLowerCase() + '|' + (e.unit || '');
+    if (have.has(key)) continue;
+    const cur = seen.get(key) || { name: e.name, unit: e.unit || '1 serving', per: e.per, count: 0 };
+    cur.count++; cur.per = e.per; seen.set(key, cur);
+  }
+  for (const v of seen.values()) {
+    await DB.putFood({ id: DB.uid(), name: v.name, unit: v.unit, per: v.per, useCount: v.count, lastUsed: Date.now() });
+  }
+  S.settings.libraryBackfilled = true;
+  await DB.saveSettings(S.settings);
+}
+
 // ---------------- Add-food sheet ----------------
 async function openAddFood() {
   const tabs = [['library', 'Library'], ['search', 'Search'], ['barcode', 'Scan'], ['photo', 'Photo'], ['manual', 'Manual']];
   const tabSeg = tabs.map((t, i) => `<button class="${i === 0 ? 'active' : ''}" data-sub="${t[0]}">${t[1]}</button>`).join('');
-  const back = openSheet('Add food', `<div class="seg" id="subseg">${tabSeg}</div><div id="subcontent"></div>`);
+  const back = openSheet('Add food', `<div class="seg" id="subseg">${tabSeg}</div><div id="subcontent"></div>`, null, null, { full: true });
   const sub = back.querySelector('#subcontent');
   back.querySelector('#subseg').addEventListener('click', (e) => {
     const b = e.target.closest('button'); if (!b) return;
@@ -914,7 +937,10 @@ async function openChat() {
 }
 async function addEntrySilent(a) {
   const date = (a.date && /^\d{4}-\d{2}-\d{2}$/.test(a.date)) ? a.date : S.date;
-  await DB.putEntry({ id: DB.uid(), date, name: a.name, unit: a.unit || '1 serving', qty: Number(a.qty) || 1, per: { ...emptyPer(), ...a.per }, order: await nextOrder(date) });
+  const unit = a.unit || '1 serving';
+  const per = { ...emptyPer(), ...a.per };
+  await DB.putEntry({ id: DB.uid(), date, name: a.name, unit, qty: Number(a.qty) || 1, per, order: await nextOrder(date) });
+  await ensureLibrary({ name: a.name, unit, per });
   return date;
 }
 function describeActions(actions) { return actions.map((a) => a.op === 'setQty' ? `• Set quantity to ${a.qty}` : a.op === 'delete' ? '• Remove an item' : a.op === 'add' ? `• Add ${esc(a.name)} (${a.per?.kcal || 0} cal)${a.date && a.date !== S.date ? ' on ' + dayLabel(a.date) : ''}` : '').join('<br>'); }
@@ -1080,4 +1106,9 @@ function saveUI() {
 // ---------------- Boot ----------------
 loadUI();
 initBackButton();
-(async () => { try { S.chat = await DB.getChat(); } catch {} render(); })();
+(async () => {
+  S.settings = await DB.getSettings();
+  try { S.chat = await DB.getChat(); } catch {}
+  try { await backfillLibrary(); } catch {}
+  render();
+})();

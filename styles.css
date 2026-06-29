@@ -252,6 +252,7 @@ input, textarea, select { outline: none; }
   padding-bottom: var(--safe-bottom);
 }
 @keyframes slideup { from { transform: translateY(100%); } }
+.sheet.full { height: 100dvh; max-height: 100dvh; border-radius: 0; }
 .sheet-head {
   display: flex; align-items: center; gap: 10px; padding: 16px 16px 8px;
 }
