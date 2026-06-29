@@ -63,6 +63,7 @@ const I = {
   copy: '<rect x="9" y="9" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10" fill="none" stroke="currentColor" stroke-width="2"/>',
   trash: '<path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
   camera: '<path d="M3 8a2 2 0 0 1 2-2h2l1.5-2h7L19 6h0a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="13" r="3.5" fill="none" stroke="currentColor" stroke-width="2"/>',
+  image: '<rect x="3" y="4" width="18" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="8.5" cy="9.5" r="1.8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M4 17l5-5 4 4 3-3 4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
   barcode: '<path d="M4 6v12M7 6v12M10 6v12M13 6v12M16 6v12M20 6v12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
   search: '<circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="m20 20-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
   spark: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8Z M19 14l.8 2.2L22 17l-2.2.8L19 20l-.8-2.2L16 17l2.2-.8Z" fill="currentColor"/>',
@@ -448,7 +449,7 @@ async function subLibrary(host, back) {
 }
 
 function subSearch(host) {
-  host.innerHTML = `<input class="input" id="ssearch" placeholder="Search foods (Open Food Facts)…"><div id="sresults" style="margin-top:10px"></div>`;
+  host.innerHTML = `<input class="input" id="ssearch" placeholder="Search foods (USDA)…"><div id="sresults" style="margin-top:10px"></div>`;
   const results = host.querySelector('#sresults'); let timer;
   host.querySelector('#ssearch').addEventListener('input', (e) => {
     const q = e.target.value.trim(); clearTimeout(timer);
@@ -456,7 +457,7 @@ function subSearch(host) {
     results.innerHTML = `<div class="empty"><span class="spinner"></span></div>`;
     timer = setTimeout(async () => {
       try {
-        const found = await searchFoods(q);
+        const found = await searchFoods(q, S.settings.fdcKey);
         if (!found.length) { results.innerHTML = `<div class="empty">No results.</div>`; return; }
         results.innerHTML = found.map((f, i) => `<div class="list-item" data-i="${i}" style="margin-bottom:8px">
           <div class="body"><div class="name">${esc(f.name)}${f.brand ? ` · <span class="faint">${esc(f.brand)}</span>` : ''}</div>
@@ -786,12 +787,30 @@ async function openPhotoViewer(startDate, startIdx) {
 // ---------- Dietician chat ----------
 async function openChat() {
   const back = openSheet('Dietician', `<div class="chat-log" id="chatlog"></div>`,
-    `<div class="chat-input"><textarea class="input" id="chatin" rows="1" placeholder="Ask, or “scale the rice to hit 2400 cal”"></textarea>
-      <button class="btn primary" id="chatsend" style="flex:none">${svg('chevR')}</button></div>`);
+    `<div style="display:flex;flex-direction:column;gap:8px;width:100%">
+      <div class="chat-attach" id="chatpreview"></div>
+      <div class="chat-input">
+        <button class="icon-btn" id="chatattach" title="Attach screenshot" style="flex:none">${svg('image')}</button>
+        <textarea class="input" id="chatin" rows="1" placeholder="Ask, share a diary screenshot, or “scale the rice to 2400 cal”"></textarea>
+        <button class="btn primary" id="chatsend" style="flex:none">${svg('chevR')}</button>
+      </div>
+      <input type="file" id="chatfile" accept="image/*" style="display:none">
+    </div>`);
   const log = back.querySelector('#chatlog'); const input = back.querySelector('#chatin');
+  let pendingImage = null;
+  function drawPreview() {
+    const p = back.querySelector('#chatpreview');
+    p.innerHTML = pendingImage ? `<div class="att-chip"><img src="${pendingImage.dataUrl}" alt=""><button class="att-rm" id="attrm">${svg('x')}</button></div>` : '';
+    const rm = back.querySelector('#attrm'); if (rm) rm.onclick = () => { pendingImage = null; drawPreview(); };
+  }
+  back.querySelector('#chatattach').onclick = () => back.querySelector('#chatfile').click();
+  back.querySelector('#chatfile').onchange = async (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    pendingImage = await compressToParts(file); drawPreview(); e.target.value = '';
+  };
   function draw() {
-    log.innerHTML = S.chat.map((m) => `<div class="msg ${m.role === 'user' ? 'user' : 'ai'}">${esc(m.text)}</div>`).join('')
-      || `<div class="empty">I'm your dietician. Ask me to adjust your day to a calorie or macro target, or any nutrition question. I use your Claude API key.</div>`;
+    log.innerHTML = S.chat.map((m) => `<div class="msg ${m.role === 'user' ? 'user' : 'ai'}">${m.image ? `<img class="msg-img" src="${m.image.dataUrl}" alt="">` : ''}${esc(m.text)}</div>`).join('')
+      || `<div class="empty">I'm your dietician. Ask me to adjust your day to a target, share a screenshot of a food diary to log it, or ask any nutrition question. I use your Claude API key.</div>`;
     if (S.pendingActions?.length) log.innerHTML += `<div class="msg ai" style="border-color:var(--cal)"><b>Proposed changes:</b><br>${describeActions(S.pendingActions)}<br><button class="btn primary sm" id="applyact" style="margin-top:8px">Apply changes</button></div>`;
     log.scrollTop = log.scrollHeight;
     const ap = back.querySelector('#applyact'); if (ap) ap.onclick = applyActions;
@@ -799,9 +818,11 @@ async function openChat() {
   draw();
   input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = Math.min(120, input.scrollHeight) + 'px'; });
   async function send() {
-    const text = input.value.trim(); if (!text) return;
+    const text = input.value.trim(); const img = pendingImage;
+    if (!text && !img) return;
     if (!S.settings.apiKey) { S.chat.push({ role: 'assistant', text: 'Add your Claude API key in Settings first.' }); draw(); return; }
-    S.chat.push({ role: 'user', text }); input.value = ''; input.style.height = 'auto'; S.pendingActions = null; draw();
+    S.chat.push({ role: 'user', text, image: img }); input.value = ''; input.style.height = 'auto';
+    pendingImage = null; drawPreview(); S.pendingActions = null; draw();
     log.innerHTML += `<div class="msg ai thinking"><span class="spinner"></span></div>`; log.scrollTop = log.scrollHeight;
     try {
       const entries = await DB.getEntries(S.date);
@@ -840,6 +861,11 @@ async function openSettings() {
         ${modelOpt('claude-opus-4-8', 'Opus 4.8 — most capable', s.model)}</select></div>
       <div class="faint" style="font-size:12px;margin-top:8px">Powers the dietician and photo estimates. Get a key at console.anthropic.com.</div>
     </div>
+    <div class="section-title" style="margin-top:14px">Food search (USDA)</div>
+    <div class="card tight">
+      <div class="field"><label>USDA API key (optional)</label><input class="input" id="setfdc" placeholder="leave blank for shared demo key" value="${esc(s.fdcKey)}"></div>
+      <div class="faint" style="font-size:12px;margin-top:8px">Blank uses a shared demo key (rate-limited). Free unlimited key: fdc.nal.usda.gov/api-key-signup</div>
+    </div>
     <div class="section-title" style="margin-top:14px">Units</div>
     <div class="field-row">
       <div class="field"><label>Weight</label><select class="select" id="setwu"><option ${s.units.weight === 'lb' ? 'selected' : ''}>lb</option><option ${s.units.weight === 'kg' ? 'selected' : ''}>kg</option></select></div>
@@ -857,6 +883,7 @@ async function openSettings() {
   `, `<button class="btn ghost" data-close-foot>Cancel</button><button class="btn primary" id="setsave">Save</button>`);
   back.querySelector('#setsave').onclick = async () => {
     s.apiKey = back.querySelector('#setkey').value.trim(); s.model = back.querySelector('#setmodel').value;
+    s.fdcKey = back.querySelector('#setfdc').value.trim();
     s.units.weight = back.querySelector('#setwu').value; s.units.length = back.querySelector('#setlu').value;
     await DB.saveSettings(s); S.settings = await DB.getSettings(); closeSheet(back); toast('Settings saved'); render();
   };
@@ -888,6 +915,11 @@ function csvq(s) { s = String(s ?? ''); return /[",\n]/.test(s) ? `"${s.replace(
 // ---------- File helpers ----------
 function fileToBase64(file) {
   return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => { const [meta, b64] = r.result.split(','); res({ base64: b64, mediaType: meta.match(/data:(.*?);/)[1] }); }; r.onerror = rej; r.readAsDataURL(file); });
+}
+async function compressToParts(file) {
+  const dataUrl = await compressImage(file, 1280, 0.8);
+  const [meta, b64] = dataUrl.split(',');
+  return { base64: b64, mediaType: (meta.match(/data:(.*?);/) || [])[1] || 'image/jpeg', dataUrl };
 }
 function compressImage(file, maxDim = 1280, quality = 0.82) {
   return new Promise((res, rej) => {

@@ -49,12 +49,50 @@ export async function lookupBarcode(code) {
   return mapProduct(data.product);
 }
 
-export async function searchFoods(query) {
-  const url = `${OFF}/cgi/search.pl?search_terms=${encodeURIComponent(query)}&search_simple=1&action=process&json=1&page_size=24&fields=${FIELDS}`;
-  const res = await fetch(url, { headers: { 'User-Agent': 'Tally/1.0 (personal)' } });
+// Text search uses USDA FoodData Central — Open Food Facts' search endpoints are
+// unreliable from the browser (no CORS on the fast service; 503s/timeouts on the rest).
+// FDC is CORS-enabled and dependable. DEMO_KEY works out of the box (rate-limited);
+// users can add a free key in Settings for unlimited use.
+const FDC = 'https://api.nal.usda.gov/fdc/v1/foods/search';
+
+function titleish(s) {
+  s = (s || '').trim();
+  return s === s.toUpperCase() ? s.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()) : s;
+}
+
+function usdaPer(food) {
+  const list = food.foodNutrients || [];
+  const val = (name, unit) => {
+    const n = list.find((x) => x.nutrientName === name && (!unit || (x.unitName || '').toUpperCase() === unit));
+    return n ? num(n.value) : 0;
+  };
+  const energy = val('Energy', 'KCAL') || val('Energy', '');
+  return {
+    kcal: Math.round(energy),
+    protein: round1(val('Protein')),
+    carbs: round1(val('Carbohydrate, by difference')),
+    fat: round1(val('Total lipid (fat)')),
+    sodium: Math.round(val('Sodium, Na')),
+    fiber: round1(val('Fiber, total dietary')),
+    sugar: round1(val('Sugars, total including NLEA') || val('Sugars, total')),
+  };
+}
+
+export async function searchFoods(query, apiKey) {
+  const key = (apiKey || '').trim() || 'DEMO_KEY';
+  const url = `${FDC}?query=${encodeURIComponent(query)}&pageSize=25&api_key=${encodeURIComponent(key)}`;
+  const res = await fetch(url);
+  if (res.status === 429) throw new Error('Search limit reached — add a free USDA key in Settings.');
   if (!res.ok) throw new Error('Search failed');
   const data = await res.json();
-  return (data.products || [])
-    .map(mapProduct)
-    .filter((p) => p.per.kcal > 0 && p.name !== 'Unnamed product');
+  return (data.foods || [])
+    .map((f) => ({
+      name: titleish(f.description),
+      brand: titleish(f.brandName || f.brandOwner || ''),
+      barcode: f.gtinUpc || '',
+      unit: '100 g',
+      image: '',
+      per: usdaPer(f),
+    }))
+    .filter((p) => p.per.kcal > 0 && p.name);
 }

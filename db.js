@@ -126,6 +126,7 @@ const DEFAULT_SETTINGS = {
   meals: ['Breakfast', 'Lunch', 'Dinner', 'Snacks'],
   apiKey: '',
   model: 'claude-haiku-4-5-20251001',
+  fdcKey: '', // USDA FoodData Central key for food search; blank = shared DEMO_KEY
 };
 
 export async function getSettings() {

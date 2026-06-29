@@ -93,14 +93,24 @@ Current totals: ${JSON.stringify(dayContext.totals)}
 Logged items (id, name, qty x unit, per-unit nutrition):
 ${dayContext.entries.map((e) => `- ${e.id}: ${e.name} — ${e.qty} x ${e.unit} @ ${JSON.stringify(e.per)}`).join('\n') || '(none)'}
 
+If the user shares a SCREENSHOT (e.g. a MyFitnessPal diary, a nutrition label, or a meal photo), read it carefully and extract each distinct food with its nutrition for the portion shown, then propose adding them via "add" actions (see below). Briefly list what you found first.
+
 When the user asks you to change the day (e.g. "scale the rice so I hit 2400 kcal", "add a snack to reach 180g protein"), do the math precisely and then, AFTER your short explanation, output a fenced code block labelled tally-actions containing a JSON array of actions. Action shapes:
 {"op":"setQty","entryId":"<id>","qty":<number>}
 {"op":"delete","entryId":"<id>"}
 {"op":"add","meal":"<meal name>","name":"<food>","unit":"<portion>","qty":<number>,"per":{"kcal":n,"protein":n,"carbs":n,"fat":n,"sodium":n,"fiber":n,"sugar":n}}
 Only include tally-actions when you are proposing concrete changes. Nutrition values in "per" are per single unit. Round quantities sensibly.`;
 
-  const messages = history.map((m) => ({ role: m.role, content: m.text }));
-  const text = await callClaude({ apiKey: settings.apiKey, model: settings.model, system, messages, max_tokens: 1024 });
+  const messages = history.map((m) => {
+    if (m.image && m.role === 'user') {
+      return { role: 'user', content: [
+        { type: 'image', source: { type: 'base64', media_type: m.image.mediaType, data: m.image.base64 } },
+        { type: 'text', text: m.text || 'Read this screenshot and extract the foods/nutrition.' },
+      ] };
+    }
+    return { role: m.role, content: m.text };
+  });
+  const text = await callClaude({ apiKey: settings.apiKey, model: settings.model, system, messages, max_tokens: 1536 });
 
   let actions = null;
   const block = text.match(/```tally-actions\s*([\s\S]*?)```/);
