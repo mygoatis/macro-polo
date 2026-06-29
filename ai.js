@@ -114,9 +114,17 @@ To log for tomorrow, set "date" to ${dayContext.tomorrow}. setQty/delete only wo
   });
   const text = await callClaude({ apiKey: settings.apiKey, model: settings.model, system, messages, max_tokens: 1536 });
 
+  // Pull actions out of any fenced block (tally-actions / json / plain), then strip ALL
+  // code fences and any stray action-array JSON from what we show the user.
   let actions = null;
-  const block = text.match(/```tally-actions\s*([\s\S]*?)```/);
-  if (block) { try { actions = JSON.parse(block[1].trim()); } catch {} }
-  const clean = text.replace(/```tally-actions[\s\S]*?```/g, '').trim();
+  const fences = [...text.matchAll(/```(?:tally-actions|json)?\s*([\s\S]*?)```/g)];
+  for (const f of fences) {
+    try { const j = JSON.parse(f[1].trim()); if (Array.isArray(j) && j.some((x) => x && x.op)) { actions = j; break; } } catch {}
+  }
+  let clean = text
+    .replace(/```[\s\S]*?```/g, '')                       // fenced code blocks
+    .replace(/\[\s*\{\s*"op"[\s\S]*?\}\s*\]/g, '')          // bare action arrays
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
   return { text: clean || 'Done.', actions };
 }

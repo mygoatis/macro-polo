@@ -45,7 +45,7 @@
     --text: #131820;
     --text-dim: #586273;
     --text-faint: #98a1b0;
-    --on-accent: #06210f;
+    --on-accent: #ffffff; /* white text on green buttons/elements in light mode */
 
     --cal: #2e9e60;       /* deeper green for contrast on light */
     --protein: #0ea5e9;
@@ -427,12 +427,12 @@ a { color: var(--protein); }
 /* ---------- Food entry macro meta ---------- */
 .entry .meta b { font-weight: 650; }
 
-/* ---------- Progress (compact log) ---------- */
-.prog-top { display: flex; justify-content: flex-end; gap: 8px; }
-.prog-inputs { display: flex; gap: 10px; align-items: flex-end; margin-top: 10px; }
-.prog-inputs .field { flex: 1; min-width: 0; }
-.prog-inputs .photo-field { flex: 0 0 auto; }
-.photo-row.compact { margin-top: 0; }
-.photo-row.compact .photo-thumb, .photo-row.compact .photo-add { width: 50px; height: 50px; }
-.photo-row.compact .photo-add { border-radius: 12px; }
-.photo-thumb .more { position: absolute; inset: 0; background: rgba(0,0,0,0.5); color: #fff; display: grid; place-items: center; font-size: 13px; font-weight: 700; }
+/* ---------- Progress (single compact row) ---------- */
+.prog-row { display: flex; gap: 8px; align-items: center; }
+.prog-row .input { flex: 1; min-width: 0; padding: 12px 8px; text-align: center; }
+.prog-row .icon-btn { flex: none; }
+.icon-btn.primary { background: var(--cal); color: var(--on-accent); }
+.photo-inline { flex: none; width: 44px; height: 44px; border-radius: 11px; background-size: cover; background-position: center; background-color: var(--bg-elev-2); border: 1px solid var(--line); display: grid; place-items: center; color: var(--text-dim); position: relative; overflow: hidden; padding: 0; }
+.photo-inline svg { width: 20px; height: 20px; }
+.photo-inline .more { position: absolute; inset: 0; background: rgba(0,0,0,0.5); color: #fff; display: grid; place-items: center; font-size: 12px; font-weight: 700; }
+.app-header h1.brand-title { color: var(--cal); }

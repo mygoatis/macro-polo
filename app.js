@@ -28,6 +28,7 @@ const NUT = [
 ];
 const META = Object.fromEntries(NUT.map((n) => [n.k, n]));
 const unitOf = (k) => META[k].unit;
+const RANGE_LABEL = { '7': '1W', '30': '1M', '90': '3M', '365': '1Y', all: 'All' };
 
 let installPrompt = null;
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installPrompt = e; });
@@ -72,6 +73,7 @@ const I = {
   check: '<path d="M5 13l4 4L19 7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>',
   x: '<path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>',
   scale: '<path d="M12 4v3M7 7h10l3 8a4 4 0 0 1-8 0l3-8M7 7l-3 8a4 4 0 0 0 8 0L7 7Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>',
+  calendar: '<rect x="3.5" y="5" width="17" height="16" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M3.5 9h17M8 3v4M16 3v4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
 };
 function svg(name, cls = '') { return `<svg class="${cls}" viewBox="0 0 24 24">${I[name]}</svg>`; }
 
@@ -151,20 +153,17 @@ function dateNav() {
 }
 
 function header() {
+  const actions = `<button class="icon-btn" data-act="chat" title="Dietician">${svg('spark')}</button><button class="icon-btn" data-act="settings">${svg('gear')}</button>`;
   if (S.tab === 'food') {
     return `<div class="app-header">
-      <div class="row"><span class="brand-mark" aria-hidden="true"></span><h1>Macro Polo</h1>
-        <button class="icon-btn" data-act="chat" title="Dietician">${svg('spark')}</button>
-        <button class="icon-btn" data-act="settings">${svg('gear')}</button></div>
+      <div class="row"><span class="brand-mark" aria-hidden="true"></span><h1 class="brand-title">Macro Polo</h1>${actions}</div>
       ${dateNav()}</div>`;
   }
   if (S.tab === 'nutrients' || S.tab === 'body') {
     const title = S.tab === 'nutrients' ? 'Nutrients' : 'Progress';
-    return `<div class="app-header"><div class="row"><h1>${title}</h1>
-      <button class="icon-btn" data-act="settings">${svg('gear')}</button></div>${dateNav()}</div>`;
+    return `<div class="app-header"><div class="row"><h1>${title}</h1>${actions}</div>${dateNav()}</div>`;
   }
-  return `<div class="app-header"><div class="row"><h1>Charts</h1>
-    <button class="icon-btn" data-act="settings">${svg('gear')}</button></div></div>`;
+  return `<div class="app-header"><div class="row"><h1>Charts</h1>${actions}</div></div>`;
 }
 
 function tabbar() {
@@ -277,21 +276,19 @@ async function renderBody() {
   const sPts = ranged.filter((r) => r.waist != null).map((r) => ({ x: r.date, y: r.waist }));
 
   const quick = `<div class="card">
-    <div class="prog-top">
-      <button class="btn sm ghost" data-act="body-pickdate">Date</button>
-      <button class="btn sm primary" data-act="body-save">Save</button>
-    </div>
-    <div class="prog-inputs">
-      <div class="field"><label>Weight (${u.weight})</label><input class="input" id="qw" inputmode="decimal" placeholder="—" value="${today.weight ?? ''}"></div>
-      <div class="field"><label>Waist (${u.length})</label><input class="input" id="qs" inputmode="decimal" placeholder="—" value="${today.waist ?? ''}"></div>
-      <div class="field photo-field"><label>Photo</label>${photoStrip(today, S.date, true, { compact: true, max: 1 })}</div>
+    <div class="prog-row">
+      <input class="input" id="qw" inputmode="decimal" placeholder="Weight" value="${today.weight ?? ''}">
+      <input class="input" id="qs" inputmode="decimal" placeholder="Waist" value="${today.waist ?? ''}">
+      ${photoInline(today, S.date)}
+      <button class="icon-btn" data-act="body-pickdate" title="Change date">${svg('calendar')}</button>
+      <button class="icon-btn primary" data-act="body-save" title="Save">${svg('check')}</button>
     </div>
     <input type="date" id="bodydate" value="${S.date}" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0">
     <input type="file" id="qphotofile" accept="image/*" capture="environment" style="display:none">
   </div>`;
 
   const ranges = ['7', '30', '90', '365', 'all'];
-  const rangeBtns = ranges.map((r) => `<button class="${S.body.mode === r ? 'active' : ''}" data-act="body-range" data-r="${r}">${r === 'all' ? 'All' : r + 'd'}</button>`).join('')
+  const rangeBtns = ranges.map((r) => `<button class="${S.body.mode === r ? 'active' : ''}" data-act="body-range" data-r="${r}">${RANGE_LABEL[r]}</button>`).join('')
     + `<button class="${S.body.mode === 'custom' ? 'active' : ''}" data-act="body-range" data-r="custom">Custom</button>`;
   const customRow = S.body.mode === 'custom' ? `<div class="field-row" style="margin-top:10px">
     <div class="field"><label>From</label><input type="date" class="input" id="bf" value="${S.body.from || ''}"></div>
@@ -299,8 +296,8 @@ async function renderBody() {
 
   const charts = `<div class="card">
     <div class="range-seg">${rangeBtns}</div>${customRow}
-    <div class="section-title" style="margin-top:14px">Weight (${u.weight})</div>${statBlock(wPts, u.weight)}${lineChart(wPts, { color: 'var(--weight)', height: 230 })}
-    <div class="section-title" style="margin-top:16px">Waist (${u.length})</div>${statBlock(sPts, u.length)}${lineChart(sPts, { color: 'var(--waist)', height: 230 })}
+    <div class="section-title" style="margin-top:14px">Weight (${u.weight})</div>${lineChart(wPts, { color: 'var(--weight)', height: 230 })}
+    <div class="section-title" style="margin-top:16px">Waist (${u.length})</div>${lineChart(sPts, { color: 'var(--waist)', height: 230 })}
   </div>`;
 
   let recent = '';
@@ -331,6 +328,14 @@ function photoStrip(rec, date, editable, opts = {}) {
   </div>`).join('');
   const add = editable ? `<button class="photo-add" data-act="body-addphoto">${svg('camera')}${opts.compact ? '' : '<span>Add</span>'}</button>` : '';
   return `<div class="photo-row ${opts.compact ? 'compact' : ''}">${thumbs}${add}</div>`;
+}
+
+function photoInline(rec, date) {
+  const photos = rec.photos || [];
+  if (photos.length) {
+    return `<button class="photo-inline" data-act="photo-open" data-date="${date}" data-idx="0" style="background-image:url('${photos[0]}')" title="View photos">${photos.length > 1 ? `<span class="more">+${photos.length - 1}</span>` : ''}</button>`;
+  }
+  return `<button class="photo-inline add" data-act="body-addphoto" title="Add photo">${svg('camera')}</button>`;
 }
 
 function statBlock(pts, unit) {
@@ -366,7 +371,7 @@ async function renderCharts() {
 
   const metricBtns = NUT.map((n) => `<button class="${metric === n.k ? 'active' : ''}" data-act="chart-metric" data-m="${n.k}">${n.label}</button>`).join('');
   const ranges = ['7', '30', '90', '365', 'all'];
-  const rangeBtns = ranges.map((r) => `<button class="${S.chart.mode === r ? 'active' : ''}" data-act="chart-range" data-r="${r}">${r === 'all' ? 'All' : r + 'd'}</button>`).join('')
+  const rangeBtns = ranges.map((r) => `<button class="${S.chart.mode === r ? 'active' : ''}" data-act="chart-range" data-r="${r}">${RANGE_LABEL[r]}</button>`).join('')
     + `<button class="${S.chart.mode === 'custom' ? 'active' : ''}" data-act="chart-range" data-r="custom">Custom</button>`;
   const customRow = S.chart.mode === 'custom' ? `<div class="field-row" style="margin-top:10px">
     <div class="field"><label>From</label><input type="date" class="input" id="cf" value="${S.chart.from || ''}"></div>
@@ -792,7 +797,7 @@ async function openChat() {
       <div class="chat-attach" id="chatpreview"></div>
       <div class="chat-input">
         <button class="icon-btn" id="chatattach" title="Attach screenshot" style="flex:none">${svg('image')}</button>
-        <textarea class="input" id="chatin" rows="1" placeholder="Ask, share a diary screenshot, or “scale the rice to 2400 cal”"></textarea>
+        <textarea class="input" id="chatin" rows="1" placeholder=""></textarea>
         <button class="btn primary" id="chatsend" style="flex:none">${svg('chevR')}</button>
       </div>
       <input type="file" id="chatfile" accept="image/*" style="display:none">
@@ -818,6 +823,10 @@ async function openChat() {
   }
   draw();
   input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = Math.min(120, input.scrollHeight) + 'px'; });
+  input.addEventListener('paste', async (e) => {
+    const item = [...(e.clipboardData?.items || [])].find((i) => i.type.startsWith('image/'));
+    if (item) { e.preventDefault(); const file = item.getAsFile(); if (file) { pendingImage = await compressToParts(file); drawPreview(); } }
+  });
   async function send() {
     const text = input.value.trim(); const img = pendingImage;
     if (!text && !img) return;
