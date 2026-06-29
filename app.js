@@ -1,0 +1,965 @@
+// app.js — Macro Polo main controller.
+import * as DB from './db.js';
+import { lineChart, macroDonut } from './charts.js';
+import * as AI from './ai.js';
+import { lookupBarcode, searchFoods } from './food-data.js';
+
+// ---------------- State ----------------
+const S = {
+  tab: 'food', // food | nutrients | body | charts
+  date: todayStr(),
+  settings: null,
+  selection: new Set(),
+  body: { mode: '90', from: null, to: null },
+  chart: { metric: 'kcal', mode: '30', from: null, to: null },
+  chat: [],
+  pendingActions: null,
+};
+
+const NUTRIENTS = ['kcal', 'protein', 'carbs', 'fat', 'sodium', 'fiber', 'sugar'];
+const NUT = [
+  { k: 'kcal', label: 'Calories', unit: 'cal', color: 'var(--cal)' },
+  { k: 'protein', label: 'Protein', unit: 'g', color: 'var(--protein)' },
+  { k: 'carbs', label: 'Carbs', unit: 'g', color: 'var(--carbs)' },
+  { k: 'fat', label: 'Fat', unit: 'g', color: 'var(--fat)' },
+  { k: 'sodium', label: 'Sodium', unit: 'mg', color: 'var(--sodium)' },
+  { k: 'fiber', label: 'Fiber', unit: 'g', color: 'var(--fiber)' },
+  { k: 'sugar', label: 'Sugar', unit: 'g', color: 'var(--sugar)' },
+];
+const META = Object.fromEntries(NUT.map((n) => [n.k, n]));
+const unitOf = (k) => META[k].unit;
+
+let installPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installPrompt = e; });
+
+// ---------------- Date helpers ----------------
+function todayStr() { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; }
+function pad(n) { return String(n).padStart(2, '0'); }
+function addDays(str, n) { const d = new Date(str + 'T00:00:00'); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; }
+function dayLabel(str) {
+  if (str === todayStr()) return 'Today';
+  if (str === addDays(todayStr(), -1)) return 'Yesterday';
+  if (str === addDays(todayStr(), 1)) return 'Tomorrow';
+  return new Date(str + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+}
+function fullDate(str) { return new Date(str + 'T00:00:00').toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }); }
+
+// ---------------- Nutrition helpers ----------------
+function entryTotals(e) { const o = {}; for (const k of NUTRIENTS) o[k] = (e.per?.[k] || 0) * (e.qty || 0); return o; }
+function sumTotals(entries) { const o = {}; for (const k of NUTRIENTS) o[k] = 0; for (const e of entries) { const t = entryTotals(e); for (const k of NUTRIENTS) o[k] += t[k]; } return o; }
+function K(n) { return Math.round(n || 0); }
+function G(n) { return Math.round((n || 0) * 10) / 10; }
+function portionText(e) { return (e.qty === 1 || e.qty == null) ? e.unit : `${G(e.qty)} × ${e.unit}`; }
+
+// ---------------- Icons ----------------
+const I = {
+  food: '<path d="M2.5 12h19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M3.5 12a8.5 8.5 0 0 0 17 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M6.5 12a5.5 5.5 0 0 1 11 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+  nutrients: '<rect x="5" y="3" width="14" height="18" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8.5 8h7M8.5 12h7M8.5 16h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
+  body: '<rect x="3.5" y="4" width="17" height="16" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7.5 8h9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="12" cy="14" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 14l1.9-1.7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>',
+  charts: '<path d="M4 19V5M4 19h16M8 15l3-4 3 2 4-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+  gear: '<path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 6.6 19.4l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.6 1.6 0 0 0 4 13.9H4a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 5.6 7.1l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.6 1.6 0 0 0 11 4.6V4a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0 .9 2.7H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1Z" fill="none" stroke="currentColor" stroke-width="1.6"/>',
+  plus: '<path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>',
+  minus: '<path d="M5 12h14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>',
+  copy: '<rect x="9" y="9" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10" fill="none" stroke="currentColor" stroke-width="2"/>',
+  trash: '<path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+  camera: '<path d="M3 8a2 2 0 0 1 2-2h2l1.5-2h7L19 6h0a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="13" r="3.5" fill="none" stroke="currentColor" stroke-width="2"/>',
+  barcode: '<path d="M4 6v12M7 6v12M10 6v12M13 6v12M16 6v12M20 6v12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
+  search: '<circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="m20 20-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+  spark: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8Z M19 14l.8 2.2L22 17l-2.2.8L19 20l-.8-2.2L16 17l2.2-.8Z" fill="currentColor"/>',
+  chevL: '<path d="M15 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>',
+  chevR: '<path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>',
+  check: '<path d="M5 13l4 4L19 7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>',
+  x: '<path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>',
+  scale: '<path d="M12 4v3M7 7h10l3 8a4 4 0 0 1-8 0l3-8M7 7l-3 8a4 4 0 0 0 8 0L7 7Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>',
+};
+function svg(name, cls = '') { return `<svg class="${cls}" viewBox="0 0 24 24">${I[name]}</svg>`; }
+
+// ---------------- DOM utils ----------------
+const $app = document.getElementById('app');
+const $sheetHost = document.getElementById('sheet-host');
+const $toastHost = document.getElementById('toast-host');
+function node(html) { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstElementChild; }
+function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+let toastTimer = null;
+function toast(msg, undoFn) {
+  $toastHost.innerHTML = '';
+  const t = node(`<div class="toast"><span>${esc(msg)}</span>${undoFn ? '<span class="undo">Undo</span>' : ''}</div>`);
+  if (undoFn) t.querySelector('.undo').onclick = () => { clearTimeout(toastTimer); $toastHost.innerHTML = ''; undoFn(); };
+  $toastHost.appendChild(t);
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.remove(), undoFn ? 5000 : 2200);
+}
+
+function openSheet(title, bodyHTML, footHTML) {
+  const back = node(`<div class="sheet-backdrop"><div class="sheet">
+    <div class="sheet-head"><div class="grip"></div><h2>${esc(title)}</h2>
+      <button class="icon-btn" data-close>${svg('x')}</button></div>
+    <div class="sheet-body">${bodyHTML}</div>
+    ${footHTML ? `<div class="sheet-foot">${footHTML}</div>` : ''}
+  </div></div>`);
+  back.addEventListener('click', (e) => { if (e.target === back) closeSheet(back); });
+  back.querySelector('[data-close]').onclick = () => closeSheet(back);
+  $sheetHost.appendChild(back);
+  return back;
+}
+function closeSheet(back) { back.remove(); }
+
+// ---------------- Render ----------------
+async function render() {
+  if (!S.settings) S.settings = await DB.getSettings();
+  let bodyHTML = '';
+  if (S.tab === 'food') bodyHTML = await renderFood();
+  else if (S.tab === 'nutrients') bodyHTML = await renderNutrients();
+  else if (S.tab === 'body') bodyHTML = await renderBody();
+  else if (S.tab === 'charts') bodyHTML = await renderCharts();
+  $app.innerHTML = header() + bodyHTML + tabbar();
+  renderSelbar();
+  if (S.tab === 'nutrients') {
+    const sc = document.getElementById('nutscroll');
+    const target = sc?.querySelector(`[data-date="${S.date}"]`) || sc?.lastElementChild;
+    if (sc && target) sc.scrollLeft = target.offsetLeft;
+    if (sc) {
+      let raf;
+      sc.addEventListener('scroll', () => {
+        cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(() => {
+          const idx = Math.round(sc.scrollLeft / sc.clientWidth);
+          const p = sc.children[idx];
+          if (p && p.dataset.date && p.dataset.date !== S.date) {
+            S.date = p.dataset.date;
+            const cur = document.querySelector('.app-header .current');
+            if (cur) { cur.classList.toggle('is-today', S.date === todayStr()); cur.innerHTML = `${dayLabel(S.date)}<small>${fullDate(S.date)}</small>`; }
+            const dp = document.getElementById('datepick'); if (dp) dp.value = S.date;
+          }
+        });
+      });
+    }
+  }
+}
+
+function dateNav() {
+  const isToday = S.date === todayStr();
+  return `<div class="date-nav">
+      <button class="arrow" data-act="date-prev">${svg('chevL')}</button>
+      <button class="current ${isToday ? 'is-today' : ''}" data-act="date-pick">${dayLabel(S.date)}<small>${fullDate(S.date)}</small></button>
+      <button class="arrow" data-act="date-next">${svg('chevR')}</button>
+    </div>
+    <input type="date" id="datepick" value="${S.date}" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0">`;
+}
+
+function header() {
+  if (S.tab === 'food') {
+    return `<div class="app-header">
+      <div class="row"><h1>Macro Polo</h1>
+        <button class="icon-btn" data-act="chat" title="Dietician">${svg('spark')}</button>
+        <button class="icon-btn" data-act="settings">${svg('gear')}</button></div>
+      ${dateNav()}</div>`;
+  }
+  if (S.tab === 'nutrients' || S.tab === 'body') {
+    const title = S.tab === 'nutrients' ? 'Nutrients' : 'Progress';
+    return `<div class="app-header"><div class="row"><h1>${title}</h1>
+      <button class="icon-btn" data-act="settings">${svg('gear')}</button></div>${dateNav()}</div>`;
+  }
+  return `<div class="app-header"><div class="row"><h1>Charts</h1>
+    <button class="icon-btn" data-act="settings">${svg('gear')}</button></div></div>`;
+}
+
+function tabbar() {
+  const tab = (id, label, icon) => `<button class="${S.tab === id ? 'active' : ''}" data-act="tab" data-tab="${id}">${svg(icon)}<span>${label}</span></button>`;
+  return `<nav class="tabbar">${tab('food', 'Food', 'food')}${tab('nutrients', 'Nutrients', 'nutrients')}${tab('body', 'Progress', 'body')}${tab('charts', 'Charts', 'charts')}</nav>`;
+}
+
+// ---------- Food tab ----------
+async function renderFood() {
+  const entries = await DB.getEntries(S.date);
+  const totals = sumTotals(entries);
+
+  const chip = (k) => `<div class="macro-chip"><span class="dot" style="background:${META[k].color}"></span>
+    <div><div class="v">${G(totals[k])}<small>g</small></div><div class="l">${META[k].label}</div></div></div>`;
+
+  const summary = `<div class="card center">
+    <div class="donut-wrap">${macroDonut({ protein: totals.protein, carbs: totals.carbs, fat: totals.fat }, totals.kcal)}</div>
+    <div class="macro-chips">${chip('carbs')}${chip('protein')}${chip('fat')}</div>
+  </div>`;
+
+  const actions = `<div class="quick-actions">
+    <button class="btn" data-act="copy-day">${svg('copy')} Copy day…</button>
+    <button class="btn primary" data-act="add-food">${svg('plus')} Add food</button>
+  </div>`;
+
+  let listHTML = '';
+  for (const e of entries) {
+    const t = entryTotals(e);
+    const sel = S.selection.has(e.id);
+    listHTML += `<div class="entry ${sel ? 'sel' : ''}" data-act="entry" data-id="${e.id}">
+      <button class="check" data-act="toggle" data-id="${e.id}">${sel ? svg('check') : ''}</button>
+      <div class="body"><div class="name">${esc(e.name)}</div><div class="meta">${esc(portionText(e))}</div></div>
+      <div class="entry-stats">
+        <div class="es"><b>${K(t.carbs)}</b><small>C</small></div>
+        <div class="es"><b>${K(t.protein)}</b><small>P</small></div>
+        <div class="es"><b>${K(t.fat)}</b><small>F</small></div>
+        <div class="es cal"><b>${K(t.kcal)}</b><small>cal</small></div>
+      </div>
+    </div>`;
+  }
+  if (!entries.length) listHTML = `<div class="empty">Nothing logged yet.<br>Tap “Add food” to start.</div>`;
+
+  return `<div class="screen">${summary}${actions}<div>${listHTML}</div></div>`;
+}
+
+function renderSelbar() {
+  const existing = document.querySelector('.selbar');
+  if (existing) existing.remove();
+  if (S.tab !== 'food' || S.selection.size === 0) return;
+  const bar = node(`<div class="selbar">
+    <span class="count">${S.selection.size} selected</span>
+    <button data-act="sel-copy">${svg('copy')} Copy to…</button>
+    <button class="danger" data-act="sel-delete">${svg('trash')} Delete</button>
+    <button data-act="sel-clear">${svg('x')}</button>
+  </div>`);
+  document.body.appendChild(bar);
+}
+
+// ---------- Nutrients tab (side-scroll by date) ----------
+async function renderNutrients() {
+  const all = await DB.getAllEntries();
+  const byDate = {};
+  for (const e of all) { (byDate[e.date] ||= []).push(e); }
+  const logged = Object.keys(byDate);
+  let start = logged.length ? logged.sort()[0] : todayStr();
+  const minStart = addDays(todayStr(), -13);
+  if (start > minStart) start = minStart;
+  if (S.date < start) start = S.date;
+  const end = todayStr() > S.date ? todayStr() : S.date;
+
+  const dates = [];
+  for (let d = start; d <= end; d = addDays(d, 1)) dates.push(d);
+
+  const rowsFor = (totals, keys) => keys.map((k) => { const n = META[k];
+    return `<div class="nut-row"><span class="dot" style="background:${n.color}"></span>
+      <span class="nl">${n.label}</span><span class="nv">${k === 'kcal' ? K(totals[k]) : G(totals[k])}<small>${n.unit}</small></span></div>`; }).join('');
+
+  const panel = (d) => {
+    const totals = sumTotals(byDate[d] || []);
+    const count = (byDate[d] || []).length;
+    return `<section class="nut-panel" data-date="${d}">
+      <div class="section-title">Calories</div>
+      <div class="card cal-hero"><span class="v">${K(totals.kcal)}</span><span class="u">cal · ${count} item${count === 1 ? '' : 's'}</span></div>
+      <div class="section-title">Macros</div>
+      <div class="card nut-rows">${rowsFor(totals, ['carbs', 'protein', 'fat'])}</div>
+      <div class="section-title">Micronutrients</div>
+      <div class="card nut-rows">${rowsFor(totals, ['sodium', 'fiber', 'sugar'])}</div>
+    </section>`;
+  };
+
+  return `<div class="nut-scroll" id="nutscroll">${dates.map(panel).join('')}</div>`;
+}
+
+// ---------- Body tab ----------
+function bodyRange(all) {
+  const m = S.body.mode;
+  if (m === 'all') return all;
+  if (m === 'custom') { const f = S.body.from, t = S.body.to; return all.filter((r) => (!f || r.date >= f) && (!t || r.date <= t)); }
+  const cutoff = addDays(todayStr(), -Number(m) + 1);
+  return all.filter((r) => r.date >= cutoff);
+}
+
+async function renderBody() {
+  const all = await DB.getAllBody();
+  const today = await DB.getBody(S.date) || {};
+  const u = S.settings.units;
+
+  const ranged = bodyRange(all);
+  const wPts = ranged.filter((r) => r.weight != null).map((r) => ({ x: r.date, y: r.weight }));
+  const sPts = ranged.filter((r) => r.waist != null).map((r) => ({ x: r.date, y: r.waist }));
+
+  const quick = `<div class="card">
+    <div class="prog-top">
+      <button class="btn sm ghost" data-act="body-pickdate">Date</button>
+      <button class="btn sm primary" data-act="body-save">Save</button>
+    </div>
+    <div class="prog-inputs">
+      <div class="field"><label>Weight (${u.weight})</label><input class="input" id="qw" inputmode="decimal" placeholder="—" value="${today.weight ?? ''}"></div>
+      <div class="field"><label>Waist (${u.length})</label><input class="input" id="qs" inputmode="decimal" placeholder="—" value="${today.waist ?? ''}"></div>
+      <div class="field photo-field"><label>Photo</label>${photoStrip(today, S.date, true, { compact: true, max: 1 })}</div>
+    </div>
+    <input type="date" id="bodydate" value="${S.date}" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0">
+    <input type="file" id="qphotofile" accept="image/*" capture="environment" style="display:none">
+  </div>`;
+
+  const ranges = ['7', '30', '90', '365', 'all'];
+  const rangeBtns = ranges.map((r) => `<button class="${S.body.mode === r ? 'active' : ''}" data-act="body-range" data-r="${r}">${r === 'all' ? 'All' : r + 'd'}</button>`).join('')
+    + `<button class="${S.body.mode === 'custom' ? 'active' : ''}" data-act="body-range" data-r="custom">Custom</button>`;
+  const customRow = S.body.mode === 'custom' ? `<div class="field-row" style="margin-top:10px">
+    <div class="field"><label>From</label><input type="date" class="input" id="bf" value="${S.body.from || ''}"></div>
+    <div class="field"><label>To</label><input type="date" class="input" id="bt" value="${S.body.to || ''}"></div></div>` : '';
+
+  const charts = `<div class="card">
+    <div class="range-seg">${rangeBtns}</div>${customRow}
+    <div class="section-title" style="margin-top:14px">Weight (${u.weight})</div>${statBlock(wPts, u.weight)}${lineChart(wPts, { color: 'var(--weight)', height: 230 })}
+    <div class="section-title" style="margin-top:16px">Waist (${u.length})</div>${statBlock(sPts, u.length)}${lineChart(sPts, { color: 'var(--waist)', height: 230 })}
+  </div>`;
+
+  let recent = '';
+  const recentList = [...all].reverse().slice(0, 40);
+  if (recentList.length) {
+    recent = `<div class="section-title">History</div>` + recentList.map((r) => {
+      const thumb = (r.photos && r.photos.length)
+        ? `<button class="hist-thumb" data-act="photo-open" data-date="${r.date}" data-idx="0"><img src="${r.photos[0]}" alt="">${r.photos.length > 1 ? `<span class="cnt">${r.photos.length}</span>` : ''}</button>` : '';
+      return `<div class="list-item" data-act="body-edit" data-date="${r.date}">
+        ${thumb}
+        <div class="body"><div class="name">${dayLabel(r.date)}</div><div class="meta">${fullDate(r.date)}</div></div>
+        <div class="right">${r.weight != null ? `${G(r.weight)} ${u.weight}` : '—'} · ${r.waist != null ? `${G(r.waist)} ${u.length}` : '—'}</div>
+      </div>`;
+    }).join('');
+  }
+
+  return `<div class="screen">${quick}${charts}${recent}</div>`;
+}
+
+function photoStrip(rec, date, editable, opts = {}) {
+  const all = rec.photos || [];
+  const shown = opts.max ? all.slice(0, opts.max) : all;
+  const extra = all.length - shown.length;
+  const thumbs = shown.map((url, i) => `<div class="photo-thumb">
+    <img src="${url}" data-act="photo-open" data-date="${date}" data-idx="${i}" alt="">
+    ${extra > 0 && i === shown.length - 1 ? `<span class="more">+${extra}</span>` : ''}
+    ${editable && !opts.compact ? `<button class="rm" data-act="photo-remove" data-date="${date}" data-idx="${i}">${svg('x')}</button>` : ''}
+  </div>`).join('');
+  const add = editable ? `<button class="photo-add" data-act="body-addphoto">${svg('camera')}${opts.compact ? '' : '<span>Add</span>'}</button>` : '';
+  return `<div class="photo-row ${opts.compact ? 'compact' : ''}">${thumbs}${add}</div>`;
+}
+
+function statBlock(pts, unit) {
+  if (!pts.length) return '';
+  const first = pts[0].y, last = pts[pts.length - 1].y;
+  const delta = G(last - first); const sign = delta > 0 ? '+' : '';
+  return `<div class="stat-row" style="margin-bottom:10px">
+    <div class="stat"><div class="v">${G(last)} <small>${unit}</small></div><div class="l">Latest</div></div>
+    <div class="stat"><div class="v">${G(Math.min(...pts.map(p=>p.y)))}–${G(Math.max(...pts.map(p=>p.y)))}</div><div class="l">Range</div></div>
+    <div class="stat"><div class="v">${sign}${delta} <small>${unit}</small></div><div class="l">Change</div></div>
+  </div>`;
+}
+
+// ---------- Charts tab ----------
+function chartRange(map) {
+  const m = S.chart.mode; const dates = Object.keys(map).sort();
+  if (m === 'custom') { const f = S.chart.from, t = S.chart.to; return dates.filter((d) => (!f || d >= f) && (!t || d <= t)); }
+  if (m === 'all') return dates;
+  const cutoff = addDays(todayStr(), -Number(m) + 1);
+  return dates.filter((d) => d >= cutoff);
+}
+
+async function renderCharts() {
+  const entries = await DB.getAllEntries();
+  const byDate = {};
+  for (const e of entries) (byDate[e.date] ||= []).push(e);
+  const totalsByDate = {}; for (const d in byDate) totalsByDate[d] = sumTotals(byDate[d]);
+
+  const metric = S.chart.metric;
+  const dates = chartRange(totalsByDate);
+  const pts = dates.map((d) => ({ x: d, y: metric === 'kcal' ? K(totalsByDate[d][metric]) : G(totalsByDate[d][metric]) }));
+  const color = META[metric].color;
+
+  const metricBtns = NUT.map((n) => `<button class="${metric === n.k ? 'active' : ''}" data-act="chart-metric" data-m="${n.k}">${n.label}</button>`).join('');
+  const ranges = ['7', '30', '90', '365', 'all'];
+  const rangeBtns = ranges.map((r) => `<button class="${S.chart.mode === r ? 'active' : ''}" data-act="chart-range" data-r="${r}">${r === 'all' ? 'All' : r + 'd'}</button>`).join('')
+    + `<button class="${S.chart.mode === 'custom' ? 'active' : ''}" data-act="chart-range" data-r="custom">Custom</button>`;
+  const customRow = S.chart.mode === 'custom' ? `<div class="field-row" style="margin-top:10px">
+    <div class="field"><label>From</label><input type="date" class="input" id="cf" value="${S.chart.from || ''}"></div>
+    <div class="field"><label>To</label><input type="date" class="input" id="ct" value="${S.chart.to || ''}"></div></div>` : '';
+
+  let stats = '';
+  if (pts.length) {
+    const vals = pts.map((p) => p.y);
+    const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+    stats = `<div class="stat-row" style="margin:12px 0">
+      <div class="stat"><div class="v">${metric === 'kcal' ? K(avg) : G(avg)}<small>${unitOf(metric)}</small></div><div class="l">Daily avg</div></div>
+      <div class="stat"><div class="v">${pts.length}</div><div class="l">Days logged</div></div>
+      <div class="stat"><div class="v">${metric === 'kcal' ? K(Math.max(...vals)) : G(Math.max(...vals))}</div><div class="l">Peak</div></div>
+    </div>`;
+  }
+
+  return `<div class="screen"><div class="card">
+    <div class="range-seg" style="margin-bottom:10px">${metricBtns}</div>
+    <div class="range-seg">${rangeBtns}</div>${customRow}${stats}
+    ${lineChart(pts, { color, height: 250 })}
+  </div></div>`;
+}
+
+// ---------------- Entry actions ----------------
+async function nextOrder(date) { const es = await DB.getEntries(date); return es.length ? Math.max(...es.map((e) => e.order || 0)) + 1 : 0; }
+
+async function addEntry({ name, unit, qty, per, foodId }) {
+  const entry = { id: DB.uid(), date: S.date, name, unit: unit || '1 serving', qty: qty || 1, per, foodId, order: await nextOrder(S.date) };
+  await DB.putEntry(entry);
+  if (foodId) {
+    const foods = await DB.getFoods(); const f = foods.find((x) => x.id === foodId);
+    if (f) { f.useCount = (f.useCount || 0) + 1; f.lastUsed = Date.now(); await DB.putFood(f); }
+  }
+  toast(`Added ${name}`, async () => { await DB.deleteEntries([entry.id]); render(); });
+  render();
+}
+
+// ---------------- Add-food sheet ----------------
+async function openAddFood() {
+  const tabs = [['library', 'Library'], ['search', 'Search'], ['barcode', 'Scan'], ['photo', 'Photo'], ['manual', 'Manual']];
+  const tabSeg = tabs.map((t, i) => `<button class="${i === 0 ? 'active' : ''}" data-sub="${t[0]}">${t[1]}</button>`).join('');
+  const back = openSheet('Add food', `<div class="seg" id="subseg">${tabSeg}</div><div id="subcontent"></div>`);
+  const sub = back.querySelector('#subcontent');
+  back.querySelector('#subseg').addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    back.querySelectorAll('#subseg button').forEach((x) => x.classList.remove('active'));
+    b.classList.add('active'); loadSub(b.dataset.sub);
+  });
+  function loadSub(name) {
+    if (name === 'library') subLibrary(sub, back);
+    else if (name === 'search') subSearch(sub);
+    else if (name === 'barcode') subBarcode(sub, back);
+    else if (name === 'photo') subPhoto(sub, back);
+    else if (name === 'manual') subManual(sub, back);
+  }
+  loadSub('library');
+}
+
+async function subLibrary(host, back) {
+  const foods = await DB.getFoods();
+  host.innerHTML = `<input class="input" id="libsearch" placeholder="Filter your foods…" style="margin-bottom:10px"><div id="liblist"></div>`;
+  const list = host.querySelector('#liblist');
+  const draw = (q = '') => {
+    const filtered = foods.filter((f) => !q || (f.name + ' ' + (f.brand || '')).toLowerCase().includes(q.toLowerCase()));
+    if (!filtered.length) { list.innerHTML = `<div class="empty">${foods.length ? 'No match.' : 'Your library is empty.<br>Foods you add are saved here for one-tap re-logging.'}</div>`; return; }
+    list.innerHTML = filtered.map((f) => `<div class="list-item" data-fid="${f.id}" style="margin-bottom:8px">
+      <div class="body"><div class="name">${esc(f.name)}${f.brand ? ` · <span class="faint">${esc(f.brand)}</span>` : ''}</div>
+        <div class="meta">${f.per.kcal} cal · ${esc(f.unit)}</div></div>
+      <button class="icon-btn" data-del="${f.id}">${svg('trash')}</button></div>`).join('');
+  };
+  draw();
+  host.querySelector('#libsearch').addEventListener('input', (e) => draw(e.target.value));
+  list.addEventListener('click', async (e) => {
+    const del = e.target.closest('[data-del]');
+    if (del) { await DB.deleteFood(del.dataset.del); const i = foods.findIndex((f) => f.id === del.dataset.del); if (i >= 0) foods.splice(i, 1); draw(host.querySelector('#libsearch').value); return; }
+    const item = e.target.closest('[data-fid]'); if (!item) return;
+    const f = foods.find((x) => x.id === item.dataset.fid);
+    await addEntry({ name: f.name, unit: f.unit, qty: 1, per: f.per, foodId: f.id });
+    closeSheet(back);
+  });
+}
+
+function subSearch(host) {
+  host.innerHTML = `<input class="input" id="ssearch" placeholder="Search foods (Open Food Facts)…"><div id="sresults" style="margin-top:10px"></div>`;
+  const results = host.querySelector('#sresults'); let timer;
+  host.querySelector('#ssearch').addEventListener('input', (e) => {
+    const q = e.target.value.trim(); clearTimeout(timer);
+    if (q.length < 2) { results.innerHTML = ''; return; }
+    results.innerHTML = `<div class="empty"><span class="spinner"></span></div>`;
+    timer = setTimeout(async () => {
+      try {
+        const found = await searchFoods(q);
+        if (!found.length) { results.innerHTML = `<div class="empty">No results.</div>`; return; }
+        results.innerHTML = found.map((f, i) => `<div class="list-item" data-i="${i}" style="margin-bottom:8px">
+          <div class="body"><div class="name">${esc(f.name)}${f.brand ? ` · <span class="faint">${esc(f.brand)}</span>` : ''}</div>
+            <div class="meta">${f.per.kcal} cal · ${esc(f.unit)}</div></div>${svg('plus')}</div>`).join('');
+        results.querySelectorAll('[data-i]').forEach((el) => el.onclick = async () => {
+          const f = found[Number(el.dataset.i)];
+          await DB.putFood({ id: DB.uid(), name: f.name, brand: f.brand, unit: f.unit, per: f.per, barcode: f.barcode, useCount: 1, lastUsed: Date.now() });
+          await addEntry({ name: f.name, unit: f.unit, qty: 1, per: f.per });
+          el.style.opacity = 0.4;
+        });
+      } catch { results.innerHTML = `<div class="empty">Search failed. Check your connection.</div>`; }
+    }, 450);
+  });
+}
+
+async function subBarcode(host, back) {
+  const hasDetector = 'BarcodeDetector' in window;
+  host.innerHTML = `${hasDetector ? `<div class="card tight" style="padding:0;overflow:hidden"><video id="cam" playsinline muted style="width:100%;display:block;background:#000;aspect-ratio:4/3;object-fit:cover"></video></div>
+      <div class="faint center" style="font-size:13px;margin:8px 0">Point the camera at a barcode</div>` : `<div class="empty">Live scanning isn't supported here. Enter the barcode number below.</div>`}
+    <div class="field-row"><input class="input" id="bcode" inputmode="numeric" placeholder="Barcode number"><button class="btn" id="blook">Look up</button></div>
+    <div id="bresult" style="margin-top:10px"></div>`;
+  const result = host.querySelector('#bresult');
+  async function lookup(code) {
+    result.innerHTML = `<div class="empty"><span class="spinner"></span></div>`;
+    try {
+      const f = await lookupBarcode(code);
+      if (!f) { result.innerHTML = `<div class="empty">Not found (${esc(code)}). Add it manually instead.</div>`; return; }
+      result.innerHTML = `<div class="list-item"><div class="body"><div class="name">${esc(f.name)}</div><div class="meta">${f.per.kcal} cal · ${esc(f.unit)}</div></div></div>
+        <button class="btn primary block" id="badd" style="margin-top:10px">Add</button>`;
+      result.querySelector('#badd').onclick = async () => {
+        await DB.putFood({ id: DB.uid(), name: f.name, brand: f.brand, unit: f.unit, per: f.per, barcode: f.barcode, useCount: 1, lastUsed: Date.now() });
+        await addEntry({ name: f.name, unit: f.unit, qty: 1, per: f.per }); closeSheet(back);
+      };
+    } catch { result.innerHTML = `<div class="empty">Lookup failed.</div>`; }
+  }
+  host.querySelector('#blook').onclick = () => { const c = host.querySelector('#bcode').value.trim(); if (c) lookup(c); };
+  if (hasDetector) {
+    try {
+      const detector = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128'] });
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      const video = host.querySelector('#cam'); video.srcObject = stream; await video.play();
+      let done = false; const stop = () => { done = true; stream.getTracks().forEach((t) => t.stop()); };
+      back.addEventListener('click', (e) => { if (e.target === back) stop(); });
+      back.querySelector('[data-close]').addEventListener('click', stop);
+      const scan = async () => {
+        if (done || !document.body.contains(video)) { stop(); return; }
+        try { const codes = await detector.detect(video); if (codes[0]) { stop(); host.querySelector('#bcode').value = codes[0].rawValue; lookup(codes[0].rawValue); return; } } catch {}
+        requestAnimationFrame(scan);
+      };
+      requestAnimationFrame(scan);
+    } catch { host.querySelector('#cam')?.remove(); }
+  }
+}
+
+function subPhoto(host, back) {
+  host.innerHTML = `<button class="btn block" id="pshoot">${svg('camera')} Take / choose photo</button>
+    <input type="file" id="pfile" accept="image/*" capture="environment" style="display:none"><div id="presult" style="margin-top:12px"></div>`;
+  const result = host.querySelector('#presult');
+  host.querySelector('#pshoot').onclick = () => host.querySelector('#pfile').click();
+  host.querySelector('#pfile').onchange = async (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    if (!S.settings.apiKey) { result.innerHTML = `<div class="empty">Add your Claude API key in Settings to use photo estimation.</div>`; return; }
+    result.innerHTML = `<div class="empty"><span class="spinner"></span> Estimating…</div>`;
+    try {
+      const { base64, mediaType } = await fileToBase64(file);
+      const items = await AI.estimateFromPhoto(base64, mediaType, S.settings);
+      const checks = items.map((it, i) => `<label class="list-item" style="margin-bottom:8px">
+        <input type="checkbox" data-i="${i}" checked style="width:20px;height:20px;accent-color:var(--cal)">
+        <div class="body"><div class="name">${esc(it.name)}</div><div class="meta">${it.per.kcal} cal · ${esc(it.unit)}</div></div></label>`).join('');
+      result.innerHTML = `<div class="faint" style="font-size:13px;margin-bottom:8px">AI estimate — tap a food after adding to fine-tune.</div>${checks}
+        <button class="btn primary block" id="padd" style="margin-top:8px">Add selected</button>`;
+      result.querySelector('#padd').onclick = async () => {
+        const chosen = [...result.querySelectorAll('input[type=checkbox]:checked')].map((c) => items[Number(c.dataset.i)]);
+        for (const it of chosen) await addEntry({ name: it.name, unit: it.unit, qty: it.qty, per: it.per });
+        closeSheet(back);
+      };
+    } catch (err) { result.innerHTML = `<div class="empty">${esc(err.message)}</div>`; }
+  };
+}
+
+function subManual(host, back) {
+  host.innerHTML = entryForm({ name: '', unit: '1 serving', qty: 1, per: emptyPer() })
+    + `<button class="btn primary block" id="madd" style="margin-top:12px">Add food</button>
+       <label class="row-between" style="margin-top:12px;font-size:14px"><span class="muted">Also save to library</span>
+         <input type="checkbox" id="msave" checked style="width:20px;height:20px;accent-color:var(--cal)"></label>`;
+  host.querySelector('#madd').onclick = async () => {
+    const data = readEntryForm(host);
+    if (!data.name) { toast('Name required'); return; }
+    if (host.querySelector('#msave').checked) await DB.putFood({ id: DB.uid(), name: data.name, unit: data.unit, per: data.per, useCount: 1, lastUsed: Date.now() });
+    await addEntry({ name: data.name, unit: data.unit, qty: data.qty, per: data.per }); closeSheet(back);
+  };
+}
+
+function emptyPer() { const o = {}; for (const k of NUTRIENTS) o[k] = 0; return o; }
+
+function entryForm(e, opts = {}) {
+  const f = (k) => `<div class="field"><label>${META[k].label}${META[k].unit ? ` (${META[k].unit})` : ''}</label>
+    <input class="input" data-f="${k}" inputmode="decimal" value="${e.per[k] ?? 0}"></div>`;
+  const qtyUnit = opts.noQty
+    ? `<div class="field"><label>Unit / portion</label><input class="input" data-f="unit" value="${esc(e.unit)}" placeholder="1 cup"></div>`
+    : `<div class="field-row" style="margin-top:10px">
+        <div class="field"><label>Quantity</label><input class="input" data-f="qty" inputmode="decimal" value="${e.qty}"></div>
+        <div class="field"><label>Unit / portion</label><input class="input" data-f="unit" value="${esc(e.unit)}" placeholder="1 cup"></div></div>`;
+  return `<div class="field"><label>Name</label><input class="input" data-f="name" value="${esc(e.name)}" placeholder="e.g. Greek yogurt"></div>
+    ${qtyUnit}
+    <div class="section-title" style="margin-top:12px">Per unit</div>
+    <div class="grid-2">${f('kcal')}${f('protein')}${f('carbs')}${f('fat')}</div>
+    <div class="grid-3" style="margin-top:10px">${f('sodium')}${f('fiber')}${f('sugar')}</div>`;
+}
+function readEntryForm(root, qtyOverride) {
+  const get = (k) => root.querySelector(`[data-f="${k}"]`)?.value ?? '';
+  const per = {}; for (const k of NUTRIENTS) per[k] = Number(get(k)) || 0;
+  const qty = qtyOverride != null ? qtyOverride : (Number(get('qty')) || 0);
+  return { name: get('name').trim(), unit: get('unit').trim() || '1 serving', qty, per };
+}
+
+// ---------- Entry detail (view nutrients + adjust volume) ----------
+async function openEntryDetail(id) {
+  const entries = await DB.getEntries(S.date);
+  const e = entries.find((x) => x.id === id); if (!e) return;
+  const back = openSheet(e.name || 'Item', `
+    <div class="qty-stepper">
+      <button class="step" id="qminus">${svg('minus')}</button>
+      <div class="qty-mid"><input class="qty-in" id="dqty" inputmode="decimal" value="${G(e.qty)}"><div class="qty-unit" id="dunitlbl">${esc(e.unit)}</div></div>
+      <button class="step" id="qplus">${svg('plus')}</button>
+    </div>
+    <div class="card nut-rows" id="dtotals"></div>
+    <button class="btn block" id="dsolve" style="margin-top:12px">${svg('scale')} Solve quantity for a target…</button>
+    <details class="edit-details"><summary>Edit details</summary>
+      <div style="margin-top:12px">${entryForm(e, { noQty: true })}</div>
+    </details>
+    <button class="btn ghost block danger-text" id="ddel" style="margin-top:10px">${svg('trash')} Delete item</button>
+  `, `<button class="btn ghost" data-close-foot>Cancel</button><button class="btn primary" id="dsave">Save</button>`);
+
+  const qtyIn = back.querySelector('#dqty');
+  const totalsEl = back.querySelector('#dtotals');
+  function curPer() { // read per from edit-details form (falls back to original)
+    const get = (k) => back.querySelector(`[data-f="${k}"]`)?.value;
+    const per = {}; for (const k of NUTRIENTS) { const v = get(k); per[k] = v != null && v !== '' ? Number(v) || 0 : (e.per[k] || 0); }
+    return per;
+  }
+  function drawTotals() {
+    const qty = Number(qtyIn.value) || 0; const per = curPer();
+    totalsEl.innerHTML = NUT.map((n) => `<div class="nut-row"><span class="dot" style="background:${n.color}"></span>
+      <span class="nl">${n.label}</span><span class="nv">${n.k === 'kcal' ? K(per[n.k] * qty) : G(per[n.k] * qty)}<small>${n.unit}</small></span></div>`).join('');
+    const unitInput = back.querySelector('[data-f="unit"]');
+    if (unitInput) back.querySelector('#dunitlbl').textContent = unitInput.value || e.unit;
+  }
+  drawTotals();
+  qtyIn.addEventListener('input', drawTotals);
+  back.querySelector('#qminus').onclick = () => { qtyIn.value = Math.max(0, G((Number(qtyIn.value) || 0) - 0.5)); drawTotals(); };
+  back.querySelector('#qplus').onclick = () => { qtyIn.value = G((Number(qtyIn.value) || 0) + 0.5); drawTotals(); };
+  back.querySelectorAll('[data-f]').forEach((el) => el.addEventListener('input', drawTotals));
+
+  back.querySelector('#dsave').onclick = async () => {
+    const data = readEntryForm(back, Number(qtyIn.value) || 0);
+    Object.assign(e, data);
+    await DB.putEntry(e); closeSheet(back); render();
+  };
+  back.querySelector('[data-close-foot]').onclick = () => closeSheet(back);
+  back.querySelector('#ddel').onclick = async () => {
+    await DB.deleteEntries([e.id]); closeSheet(back);
+    toast('Item deleted', async () => { await DB.putEntry(e); render(); }); render();
+  };
+  back.querySelector('#dsolve').onclick = () => { closeSheet(back); openSolver(e.id); };
+}
+
+// ---------- Solver ----------
+async function openSolver(entryId) {
+  const entries = await DB.getEntries(S.date);
+  const totals = sumTotals(entries);
+  const itemOpts = entries.map((x) => `<option value="${x.id}" ${x.id === entryId ? 'selected' : ''}>${esc(x.name)}</option>`).join('');
+  const metricOpts = [['kcal', 'Calories'], ['protein', 'Protein'], ['carbs', 'Carbs'], ['fat', 'Fat']].map((m) => `<option value="${m[0]}">${m[1]}</option>`).join('');
+  const defTarget = Math.max(0, Math.round(totals.kcal / 50) * 50) || 2000;
+
+  const back = openSheet('Solve quantity', `
+    <div class="faint" style="font-size:14px">Pick a food and a target for the day — Macro Polo computes the quantity that hits it.</div>
+    <div class="field" style="margin-top:12px"><label>Adjust this food</label><select class="select" id="sitem">${itemOpts}</select></div>
+    <div class="field-row" style="margin-top:10px">
+      <div class="field"><label>Target metric</label><select class="select" id="smetric">${metricOpts}</select></div>
+      <div class="field"><label>Target total</label><input class="input" id="starget" inputmode="decimal" value="${defTarget}"></div>
+    </div>
+    <div id="sout" style="margin-top:14px"></div>
+  `, `<button class="btn ghost" data-close-foot>Close</button><button class="btn primary" id="sapply" disabled>Apply</button>`);
+  const out = back.querySelector('#sout'); let solution = null;
+  function compute() {
+    const item = entries.find((x) => x.id === back.querySelector('#sitem').value);
+    const metric = back.querySelector('#smetric').value;
+    const target = Number(back.querySelector('#starget').value);
+    const per = item.per[metric] || 0;
+    const others = totals[metric] - entryTotals(item)[metric];
+    if (per <= 0) { out.innerHTML = `<div class="empty">“${esc(item.name)}” has no ${META[metric].label.toLowerCase()} per unit, so it can't be scaled for this target.</div>`; solution = null; back.querySelector('#sapply').disabled = true; return; }
+    const needed = (target - others) / per;
+    if (needed < 0) { out.innerHTML = `<div class="empty">Even with 0 of “${esc(item.name)}”, the rest of the day is ${K(others)}${unitOf(metric)} — above ${K(target)}. Reduce another item.</div>`; solution = null; back.querySelector('#sapply').disabled = true; return; }
+    const newQty = G(needed); const nt = {}; for (const k of NUTRIENTS) nt[k] = (totals[k] - entryTotals(item)[k]) + item.per[k] * needed;
+    solution = { item, qty: newQty };
+    out.innerHTML = `<div class="card tight">
+      <div class="row-between"><span class="muted">${esc(item.name)}</span><b style="font-size:18px">${G(item.qty)} → ${newQty} × ${esc(item.unit)}</b></div>
+      <div class="divider"></div><div class="row-between"><span class="muted">Day ${META[metric].label.toLowerCase()}</span><b>${K(totals[metric])} → ${K(nt[metric])}${unitOf(metric)}</b></div>
+      <div class="faint" style="font-size:12.5px;margin-top:8px">New day: ${K(nt.kcal)} cal · P${G(nt.protein)} C${G(nt.carbs)} F${G(nt.fat)}</div></div>`;
+    back.querySelector('#sapply').disabled = false;
+  }
+  ['#sitem', '#smetric', '#starget'].forEach((sel) => back.querySelector(sel).addEventListener('input', compute));
+  back.querySelector('[data-close-foot]').onclick = () => closeSheet(back);
+  back.querySelector('#sapply').onclick = async () => { if (!solution) return; solution.item.qty = solution.qty; await DB.putEntry(solution.item); closeSheet(back); toast('Quantity updated'); render(); };
+  compute();
+}
+
+// ---------- Copy day / copy selected ----------
+async function openCopyDay() {
+  const src = await DB.getEntries(S.date);
+  if (!src.length) { toast('Nothing to copy on this day'); return; }
+  openCalendarPicker(`Copy ${dayLabel(S.date)} → which days?`, S.date, async (targets) => copyEntriesToDates(src, targets));
+}
+async function openCopySelected() {
+  const entries = await DB.getEntries(S.date);
+  const chosen = entries.filter((e) => S.selection.has(e.id));
+  if (!chosen.length) return;
+  openCalendarPicker(`Copy ${chosen.length} item${chosen.length > 1 ? 's' : ''} → which days?`, null, async (targets) => { await copyEntriesToDates(chosen, targets); S.selection.clear(); });
+}
+async function copyEntriesToDates(entries, targets) {
+  const clones = [];
+  for (const date of targets) {
+    let ord = await nextOrder(date);
+    for (const e of entries) clones.push({ ...e, id: DB.uid(), date, order: ord++ });
+  }
+  await DB.putEntries(clones);
+  toast(`Copied to ${targets.length} day${targets.length > 1 ? 's' : ''}`, async () => { await DB.deleteEntries(clones.map((c) => c.id)); render(); });
+  render();
+}
+
+function openCalendarPicker(title, sourceDate, onConfirm) {
+  const selected = new Set();
+  let viewMonth = new Date((sourceDate || todayStr()) + 'T00:00:00'); viewMonth.setDate(1);
+  const back = openSheet(title, `<div id="calwrap"></div><div class="faint center" id="calcount" style="font-size:13px;margin-top:8px">Tap days to select</div>`,
+    `<button class="btn ghost" data-close-foot>Cancel</button><button class="btn primary" id="calok" disabled>Copy</button>`);
+  function drawCal() {
+    const y = viewMonth.getFullYear(), m = viewMonth.getMonth();
+    const startDow = new Date(y, m, 1).getDay(); const days = new Date(y, m + 1, 0).getDate();
+    const monthLabel = viewMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    const dow = ['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d) => `<div class="dow">${d}</div>`).join('');
+    let cells = ''; for (let i = 0; i < startDow; i++) cells += `<div></div>`;
+    for (let d = 1; d <= days; d++) { const ds = `${y}-${pad(m + 1)}-${pad(d)}`;
+      const cls = [ds === sourceDate ? 'src' : '', ds === todayStr() ? 'today' : '', selected.has(ds) ? 'sel' : ''].join(' ');
+      cells += `<div class="cal-cell ${cls}" data-d="${ds}">${d}</div>`; }
+    back.querySelector('#calwrap').innerHTML = `<div class="cal-head"><button class="icon-btn" data-cal="prev">${svg('chevL')}</button><b>${monthLabel}</b><button class="icon-btn" data-cal="next">${svg('chevR')}</button></div><div class="cal-grid">${dow}${cells}</div>`;
+  }
+  drawCal();
+  back.querySelector('#calwrap').addEventListener('click', (e) => {
+    const nav = e.target.closest('[data-cal]');
+    if (nav) { viewMonth.setMonth(viewMonth.getMonth() + (nav.dataset.cal === 'next' ? 1 : -1)); drawCal(); return; }
+    const cell = e.target.closest('[data-d]'); if (!cell) return;
+    const ds = cell.dataset.d; if (ds === sourceDate) return;
+    selected.has(ds) ? selected.delete(ds) : selected.add(ds); drawCal();
+    back.querySelector('#calcount').textContent = selected.size ? `${selected.size} day${selected.size > 1 ? 's' : ''} selected` : 'Tap days to select';
+    back.querySelector('#calok').disabled = selected.size === 0;
+  });
+  back.querySelector('[data-close-foot]').onclick = () => closeSheet(back);
+  back.querySelector('#calok').onclick = async () => { closeSheet(back); await onConfirm([...selected].sort()); };
+}
+
+// ---------- Body edit + photos ----------
+async function openBodyEdit(date) {
+  const rec = (await DB.getBody(date)) || { date };
+  const u = S.settings.units;
+  const back = openSheet(`Body — ${dayLabel(date)}`, `
+    <div class="faint">${fullDate(date)}</div>
+    <div class="field-row" style="margin-top:12px">
+      <div class="field"><label>Weight (${u.weight})</label><input class="input" id="ew" inputmode="decimal" value="${rec.weight ?? ''}"></div>
+      <div class="field"><label>Waist (${u.length})</label><input class="input" id="es" inputmode="decimal" value="${rec.waist ?? ''}"></div>
+    </div>
+    <div class="section-title" style="margin-top:14px">Progress photos</div>
+    <div id="ephotos">${photoStrip(rec, date, true)}</div>
+    <input type="file" id="ephotofile" accept="image/*" capture="environment" style="display:none">`,
+    `<button class="btn ghost danger-text" id="ebdel">Delete day</button><button class="btn primary" id="ebsave">Save</button>`);
+
+  const refreshPhotos = async () => { const r = (await DB.getBody(date)) || { date }; back.querySelector('#ephotos').innerHTML = photoStrip(r, date, true); };
+  back.querySelector('#ephotos').addEventListener('click', async (e) => {
+    const add = e.target.closest('[data-act="body-addphoto"]'); if (add) { back.querySelector('#ephotofile').click(); return; }
+    const rm = e.target.closest('[data-act="photo-remove"]'); if (rm) { await removePhotoFromDate(date, Number(rm.dataset.idx)); await refreshPhotos(); render(); return; }
+    const open = e.target.closest('[data-act="photo-open"]'); if (open) openPhotoViewer(open.dataset.date, Number(open.dataset.idx));
+  });
+  back.querySelector('#ephotofile').onchange = async (e) => { const file = e.target.files[0]; if (!file) return; const url = await compressImage(file); await addPhotoToDate(date, url); await refreshPhotos(); render(); };
+
+  back.querySelector('#ebsave').onclick = async () => {
+    const w = back.querySelector('#ew').value.trim(), s = back.querySelector('#es').value.trim();
+    const cur = (await DB.getBody(date)) || { date };
+    await DB.putBody({ ...cur, date, weight: w === '' ? null : Number(w), waist: s === '' ? null : Number(s) });
+    closeSheet(back); render();
+  };
+  back.querySelector('#ebdel').onclick = async () => { await DB.deleteBody(date); closeSheet(back); render(); };
+}
+
+async function addPhotoToDate(date, url) { const rec = (await DB.getBody(date)) || { date }; rec.photos = rec.photos || []; rec.photos.push(url); await DB.putBody(rec); }
+async function removePhotoFromDate(date, idx) { const rec = await DB.getBody(date); if (!rec?.photos) return; rec.photos.splice(idx, 1); if (!rec.photos.length) delete rec.photos; await DB.putBody(rec); }
+
+// ---------- Photo comparison viewer ----------
+async function openPhotoViewer(startDate, startIdx) {
+  const all = await DB.getAllBody();
+  const photos = [];
+  all.forEach((r) => (r.photos || []).forEach((url, i) => photos.push({ date: r.date, url, idx: i })));
+  if (!photos.length) return;
+  let a = photos.findIndex((p) => p.date === startDate && p.idx === startIdx); if (a < 0) a = photos.length - 1;
+  let b = photos.length > 1 ? (a > 0 ? a - 1 : a + 1) : a;
+  let active = 'B';
+
+  const back = openSheet('Compare photos', `
+    <div class="pv-stage">
+      <div class="pv-slot" data-slot="A"><img id="pvA"><div class="pv-cap" id="pvACap"></div></div>
+      <div class="pv-slot" data-slot="B"><img id="pvB"><div class="pv-cap" id="pvBCap"></div></div>
+    </div>
+    <div class="faint center" style="font-size:12px;margin:6px 0">Tap a side to select it, then tap a photo below</div>
+    <div class="pv-strip" id="pvstrip"></div>`);
+
+  function paint() {
+    const pa = photos[a], pb = photos[b];
+    back.querySelector('#pvA').src = pa.url; back.querySelector('#pvACap').textContent = dayLabel(pa.date);
+    back.querySelector('#pvB').src = pb.url; back.querySelector('#pvBCap').textContent = dayLabel(pb.date);
+    back.querySelectorAll('.pv-slot').forEach((s) => s.classList.toggle('active', s.dataset.slot === active));
+    back.querySelector('#pvstrip').innerHTML = photos.map((p, i) => `<button class="pv-thumb ${i === a ? 'isA' : ''} ${i === b ? 'isB' : ''}" data-i="${i}"><img src="${p.url}"><span>${dayLabel(p.date)}</span></button>`).join('');
+  }
+  paint();
+  back.querySelector('.pv-stage').addEventListener('click', (e) => { const slot = e.target.closest('.pv-slot'); if (slot) { active = slot.dataset.slot; paint(); } });
+  back.querySelector('#pvstrip').addEventListener('click', (e) => { const th = e.target.closest('[data-i]'); if (!th) return; const i = Number(th.dataset.i); if (active === 'A') a = i; else b = i; paint(); });
+}
+
+// ---------- Dietician chat ----------
+async function openChat() {
+  const back = openSheet('Dietician', `<div class="chat-log" id="chatlog"></div>`,
+    `<div class="chat-input"><textarea class="input" id="chatin" rows="1" placeholder="Ask, or “scale the rice to hit 2400 cal”"></textarea>
+      <button class="btn primary" id="chatsend" style="flex:none">${svg('chevR')}</button></div>`);
+  const log = back.querySelector('#chatlog'); const input = back.querySelector('#chatin');
+  function draw() {
+    log.innerHTML = S.chat.map((m) => `<div class="msg ${m.role === 'user' ? 'user' : 'ai'}">${esc(m.text)}</div>`).join('')
+      || `<div class="empty">I'm your dietician. Ask me to adjust your day to a calorie or macro target, or any nutrition question. I use your Claude API key.</div>`;
+    if (S.pendingActions?.length) log.innerHTML += `<div class="msg ai" style="border-color:var(--cal)"><b>Proposed changes:</b><br>${describeActions(S.pendingActions)}<br><button class="btn primary sm" id="applyact" style="margin-top:8px">Apply changes</button></div>`;
+    log.scrollTop = log.scrollHeight;
+    const ap = back.querySelector('#applyact'); if (ap) ap.onclick = applyActions;
+  }
+  draw();
+  input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = Math.min(120, input.scrollHeight) + 'px'; });
+  async function send() {
+    const text = input.value.trim(); if (!text) return;
+    if (!S.settings.apiKey) { S.chat.push({ role: 'assistant', text: 'Add your Claude API key in Settings first.' }); draw(); return; }
+    S.chat.push({ role: 'user', text }); input.value = ''; input.style.height = 'auto'; S.pendingActions = null; draw();
+    log.innerHTML += `<div class="msg ai thinking"><span class="spinner"></span></div>`; log.scrollTop = log.scrollHeight;
+    try {
+      const entries = await DB.getEntries(S.date);
+      const ctx = { date: S.date, totals: roundTotals(sumTotals(entries)), entries: entries.map((e) => ({ id: e.id, name: e.name, qty: e.qty, unit: e.unit, per: e.per })) };
+      const { text: reply, actions } = await AI.chatComplete(S.chat, ctx, S.settings);
+      S.chat.push({ role: 'assistant', text: reply }); S.pendingActions = actions && actions.length ? actions : null;
+    } catch (err) { S.chat.push({ role: 'assistant', text: '⚠️ ' + err.message }); }
+    draw();
+  }
+  back.querySelector('#chatsend').onclick = send;
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
+  async function applyActions() {
+    const entries = await DB.getEntries(S.date);
+    for (const act of S.pendingActions) {
+      if (act.op === 'setQty') { const e = entries.find((x) => x.id === act.entryId); if (e) { e.qty = Number(act.qty); await DB.putEntry(e); } }
+      else if (act.op === 'delete') await DB.deleteEntries([act.entryId]);
+      else if (act.op === 'add') await addEntrySilent(act);
+    }
+    S.pendingActions = null; S.chat.push({ role: 'assistant', text: '✓ Applied.' }); draw(); render();
+  }
+}
+async function addEntrySilent(a) { await DB.putEntry({ id: DB.uid(), date: S.date, name: a.name, unit: a.unit || '1 serving', qty: Number(a.qty) || 1, per: { ...emptyPer(), ...a.per }, order: await nextOrder(S.date) }); }
+function describeActions(actions) { return actions.map((a) => a.op === 'setQty' ? `• Set quantity to ${a.qty}` : a.op === 'delete' ? '• Remove an item' : a.op === 'add' ? `• Add ${esc(a.name)} (${a.per?.kcal || 0} cal)` : '').join('<br>'); }
+function roundTotals(t) { const o = {}; for (const k of NUTRIENTS) o[k] = K(t[k]); return o; }
+
+// ---------- Settings ----------
+async function openSettings() {
+  const s = S.settings;
+  const back = openSheet('Settings', `
+    <div class="section-title">Claude API</div>
+    <div class="card tight">
+      <div class="field"><label>API key (stored only on this device)</label><input class="input" id="setkey" type="password" placeholder="sk-ant-…" value="${esc(s.apiKey)}"></div>
+      <div class="field" style="margin-top:10px"><label>Model</label><select class="select" id="setmodel">
+        ${modelOpt('claude-haiku-4-5-20251001', 'Haiku 4.5 — fast & cheap', s.model)}
+        ${modelOpt('claude-sonnet-4-6', 'Sonnet 4.6 — balanced', s.model)}
+        ${modelOpt('claude-opus-4-8', 'Opus 4.8 — most capable', s.model)}</select></div>
+      <div class="faint" style="font-size:12px;margin-top:8px">Powers the dietician and photo estimates. Get a key at console.anthropic.com.</div>
+    </div>
+    <div class="section-title" style="margin-top:14px">Units</div>
+    <div class="field-row">
+      <div class="field"><label>Weight</label><select class="select" id="setwu"><option ${s.units.weight === 'lb' ? 'selected' : ''}>lb</option><option ${s.units.weight === 'kg' ? 'selected' : ''}>kg</option></select></div>
+      <div class="field"><label>Length</label><select class="select" id="setlu"><option ${s.units.length === 'in' ? 'selected' : ''}>in</option><option ${s.units.length === 'cm' ? 'selected' : ''}>cm</option></select></div>
+    </div>
+    <div class="section-title" style="margin-top:14px">Data</div>
+    <div class="grid-2">
+      <button class="btn sm" data-act="export-json">Export JSON</button>
+      <button class="btn sm" data-act="export-csv">Export CSV</button>
+      <button class="btn sm" data-act="import-json">Import JSON</button>
+      <button class="btn sm" id="setinstall">Install app</button>
+    </div>
+    <input type="file" id="importfile" accept="application/json,.json" style="display:none">
+    <div class="faint center" style="font-size:12px;margin-top:14px">Macro Polo · all data stays on this device</div>
+  `, `<button class="btn ghost" data-close-foot>Cancel</button><button class="btn primary" id="setsave">Save</button>`);
+  back.querySelector('#setsave').onclick = async () => {
+    s.apiKey = back.querySelector('#setkey').value.trim(); s.model = back.querySelector('#setmodel').value;
+    s.units.weight = back.querySelector('#setwu').value; s.units.length = back.querySelector('#setlu').value;
+    await DB.saveSettings(s); S.settings = await DB.getSettings(); closeSheet(back); toast('Settings saved'); render();
+  };
+  back.querySelector('[data-close-foot]').onclick = () => closeSheet(back);
+  const installBtn = back.querySelector('#setinstall');
+  if (!installPrompt) installBtn.textContent = 'Add via browser menu';
+  installBtn.onclick = async () => { if (installPrompt) { installPrompt.prompt(); installPrompt = null; } else toast('Use your browser’s “Add to Home Screen”'); };
+  back.querySelector('#importfile').onchange = async (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    try { const data = JSON.parse(await file.text()); await DB.importAll(data, { merge: true }); S.settings = await DB.getSettings(); closeSheet(back); toast('Imported'); render(); }
+    catch { toast('Import failed — invalid file'); }
+  };
+}
+function modelOpt(id, label, cur) { return `<option value="${id}" ${cur === id ? 'selected' : ''}>${label}</option>`; }
+
+// ---------- Export ----------
+function download(filename, text, type) { const blob = new Blob([text], { type }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = filename; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
+async function exportJSON() { const data = await DB.exportAll(); download(`macropolo-backup-${todayStr()}.json`, JSON.stringify(data, null, 2), 'application/json'); toast('Exported JSON'); }
+async function exportCSV() {
+  const [entries, body] = [await DB.getAllEntries(), await DB.getAllBody()];
+  let csv = 'type,date,name,qty,unit,cal,protein,carbs,fat,sodium,fiber,sugar\n';
+  for (const e of entries.sort((a, b) => a.date.localeCompare(b.date))) { const t = entryTotals(e); csv += ['food', e.date, csvq(e.name), G(e.qty), csvq(e.unit), K(t.kcal), G(t.protein), G(t.carbs), G(t.fat), K(t.sodium), G(t.fiber), G(t.sugar)].join(',') + '\n'; }
+  csv += '\ntype,date,weight,waist,photos\n';
+  for (const b of body) csv += ['body', b.date, b.weight ?? '', b.waist ?? '', (b.photos || []).length].join(',') + '\n';
+  download(`macropolo-export-${todayStr()}.csv`, csv, 'text/csv'); toast('Exported CSV');
+}
+function csvq(s) { s = String(s ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }
+
+// ---------- File helpers ----------
+function fileToBase64(file) {
+  return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => { const [meta, b64] = r.result.split(','); res({ base64: b64, mediaType: meta.match(/data:(.*?);/)[1] }); }; r.onerror = rej; r.readAsDataURL(file); });
+}
+function compressImage(file, maxDim = 1280, quality = 0.82) {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => {
+      let { width, height } = img;
+      if (width > height && width > maxDim) { height = height * maxDim / width; width = maxDim; }
+      else if (height > maxDim) { width = width * maxDim / height; height = maxDim; }
+      const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
+      canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+      res(canvas.toDataURL('image/jpeg', quality)); URL.revokeObjectURL(img.src);
+    };
+    img.onerror = rej; img.src = URL.createObjectURL(file);
+  });
+}
+
+// ---------------- Global events ----------------
+document.addEventListener('click', async (e) => {
+  const t = e.target.closest('[data-act]'); if (!t) return;
+  const act = t.dataset.act;
+  switch (act) {
+    case 'tab': S.tab = t.dataset.tab; S.selection.clear(); render(); break;
+    case 'settings': openSettings(); break;
+    case 'chat': openChat(); break;
+    case 'date-prev': S.date = addDays(S.date, -1); S.selection.clear(); render(); break;
+    case 'date-next': S.date = addDays(S.date, 1); S.selection.clear(); render(); break;
+    case 'date-pick': { const dp = document.getElementById('datepick'); dp.showPicker ? dp.showPicker() : dp.click(); break; }
+    case 'add-food': openAddFood(); break;
+    case 'copy-day': openCopyDay(); break;
+    case 'entry': openEntryDetail(t.dataset.id); break;
+    case 'toggle': { const id = t.dataset.id; S.selection.has(id) ? S.selection.delete(id) : S.selection.add(id); render(); break; }
+    case 'sel-copy': openCopySelected(); break;
+    case 'sel-delete': await deleteSelected(); break;
+    case 'sel-clear': S.selection.clear(); render(); break;
+    case 'body-save': await saveBodyQuick(); break;
+    case 'body-pickdate': { const dp = document.getElementById('bodydate'); dp.showPicker ? dp.showPicker() : dp.click(); break; }
+    case 'body-range': setBodyRange(t.dataset.r); break;
+    case 'body-edit': openBodyEdit(t.dataset.date); break;
+    case 'body-addphoto': document.getElementById('qphotofile')?.click(); break;
+    case 'photo-remove': await removePhotoFromDate(t.dataset.date, Number(t.dataset.idx)); render(); break;
+    case 'photo-open': openPhotoViewer(t.dataset.date, Number(t.dataset.idx)); break;
+    case 'chart-metric': S.chart.metric = t.dataset.m; render(); break;
+    case 'chart-range': setChartRange(t.dataset.r); break;
+    case 'export-json': exportJSON(); break;
+    case 'export-csv': exportCSV(); break;
+    case 'import-json': document.getElementById('importfile').click(); break;
+  }
+});
+
+document.addEventListener('change', async (e) => {
+  if (e.target.id === 'datepick') { S.date = e.target.value; S.selection.clear(); render(); }
+  else if (e.target.id === 'bodydate') { S.date = e.target.value; render(); }
+  else if (e.target.id === 'bf') { S.body.from = e.target.value; render(); }
+  else if (e.target.id === 'bt') { S.body.to = e.target.value; render(); }
+  else if (e.target.id === 'cf') { S.chart.from = e.target.value; render(); }
+  else if (e.target.id === 'ct') { S.chart.to = e.target.value; render(); }
+  else if (e.target.id === 'qphotofile') { const file = e.target.files[0]; if (file) { const url = await compressImage(file); await addPhotoToDate(S.date, url); render(); } }
+});
+
+async function deleteSelected() {
+  const ids = [...S.selection]; const entries = await DB.getEntries(S.date);
+  const removed = entries.filter((e) => ids.includes(e.id)); await DB.deleteEntries(ids); S.selection.clear();
+  toast(`Deleted ${ids.length} item${ids.length > 1 ? 's' : ''}`, async () => { await DB.putEntries(removed); render(); }); render();
+}
+async function saveBodyQuick() {
+  const w = document.getElementById('qw').value.trim(), s = document.getElementById('qs').value.trim();
+  const cur = (await DB.getBody(S.date)) || { date: S.date };
+  await DB.putBody({ ...cur, date: S.date, weight: w === '' ? null : Number(w), waist: s === '' ? null : Number(s) });
+  toast('Saved'); render();
+}
+function setBodyRange(r) { S.body.mode = r; if (r === 'custom' && !S.body.from) { S.body.from = addDays(todayStr(), -30); S.body.to = todayStr(); } render(); }
+function setChartRange(r) { S.chart.mode = r; if (r === 'custom' && !S.chart.from) { S.chart.from = addDays(todayStr(), -30); S.chart.to = todayStr(); } render(); }
+
+// ---------------- Boot ----------------
+render();
