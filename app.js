@@ -56,7 +56,14 @@ function nutrientRows(vals, keys) {
       <span class="nl">${n.label}</span><span class="nv">${k === 'kcal' ? K(vals[k]) : G(vals[k])}<small>${n.unit}</small></span></div>`;
   }).join('');
 }
-function portionText(e) { return (e.qty === 1 || e.qty == null) ? e.unit : `${G(e.qty)} × ${e.unit}`; }
+// Split a unit like "100 g" -> {num:100, label:'g'}, "1 cup" -> {num:1, label:'cup'}.
+function parseUnit(u) {
+  const m = /^\s*([\d.]+)\s*(.*)$/.exec(u || '');
+  if (m && m[1]) return { num: Number(m[1]) || 1, label: (m[2] || 'unit').trim() || 'unit' };
+  return { num: 1, label: (u || 'serving').trim() || 'serving' };
+}
+// Amount shown in the unit's own measure, no "×": qty 1.5 of "100 g" -> "150 g".
+function portionText(e) { const { num, label } = parseUnit(e.unit); return `${G((e.qty || 1) * num)} ${label}`; }
 
 // ---------------- Icons ----------------
 const I = {
@@ -420,19 +427,19 @@ async function nextOrder(date) { const es = await DB.getEntries(date); return es
 async function addEntry({ name, unit, qty, per, foodId, brand, barcode }) {
   const entry = { id: DB.uid(), date: S.date, name, unit: unit || '1 serving', qty: qty || 1, per, foodId, order: await nextOrder(S.date) };
   await DB.putEntry(entry);
-  await ensureLibrary({ name, unit: entry.unit, per, foodId, brand, barcode });
+  await ensureLibrary({ name, unit: entry.unit, per, foodId, brand, barcode, qty: entry.qty });
   toast(`Added ${name}`, async () => { await DB.deleteEntries([entry.id]); render(); });
   render();
 }
 
 // Every logged food becomes a reusable library item (deduped by name + unit).
-async function ensureLibrary({ name, unit, per, foodId, brand, barcode }) {
+async function ensureLibrary({ name, unit, per, foodId, brand, barcode, qty }) {
   if (!name) return;
   const foods = await DB.getFoods();
   let f = foodId ? foods.find((x) => x.id === foodId) : null;
   if (!f) f = foods.find((x) => x.nameLower === (name || '').toLowerCase() && (x.unit || '') === (unit || ''));
-  if (f) { f.useCount = (f.useCount || 0) + 1; f.lastUsed = Date.now(); await DB.putFood(f); }
-  else await DB.putFood({ id: DB.uid(), name, unit, per, brand, barcode, useCount: 1, lastUsed: Date.now() });
+  if (f) { f.useCount = (f.useCount || 0) + 1; f.lastUsed = Date.now(); if (qty != null) f.lastQty = qty; await DB.putFood(f); }
+  else await DB.putFood({ id: DB.uid(), name, unit, per, brand, barcode, useCount: 1, lastUsed: Date.now(), lastQty: qty != null ? qty : 1 });
 }
 
 // One-time: seed the library from previously-logged real foods (skip MFP day summaries).
@@ -447,11 +454,11 @@ async function backfillLibrary() {
     if (LIB_SKIP.has(e.name.toLowerCase())) continue;
     const key = e.name.toLowerCase() + '|' + (e.unit || '');
     if (have.has(key)) continue;
-    const cur = seen.get(key) || { name: e.name, unit: e.unit || '1 serving', per: e.per, count: 0 };
-    cur.count++; cur.per = e.per; seen.set(key, cur);
+    const cur = seen.get(key) || { name: e.name, unit: e.unit || '1 serving', per: e.per, count: 0, lastQty: 1 };
+    cur.count++; cur.per = e.per; cur.lastQty = e.qty || 1; seen.set(key, cur);
   }
   for (const v of seen.values()) {
-    await DB.putFood({ id: DB.uid(), name: v.name, unit: v.unit, per: v.per, useCount: v.count, lastUsed: Date.now() });
+    await DB.putFood({ id: DB.uid(), name: v.name, unit: v.unit, per: v.per, useCount: v.count, lastUsed: Date.now(), lastQty: v.lastQty });
   }
   S.settings.libraryBackfilled = true;
   await DB.saveSettings(S.settings);
@@ -499,12 +506,13 @@ async function subLibrary(host, back) {
     const sort = LIB_SORTS[host.querySelector('#libsort').value] || LIB_SORTS.recent;
     const filtered = foods.filter((f) => !q || (f.name + ' ' + (f.brand || '')).toLowerCase().includes(q.toLowerCase())).sort(sort);
     if (!filtered.length) { list.innerHTML = `<div class="empty">${foods.length ? 'No match.' : 'Your library is empty.<br>Foods you log are saved here for one-tap re-logging.'}</div>`; return; }
-    list.innerHTML = filtered.map((f) => `<div class="list-item" data-fid="${f.id}" style="margin-bottom:8px">
+    list.innerHTML = filtered.map((f) => { const u = parseUnit(f.unit); const amt = G((f.lastQty || 1) * u.num);
+      return `<div class="list-item" data-fid="${f.id}" style="margin-bottom:8px">
       <div class="body"><div class="name">${esc(f.name)}${f.brand ? ` · <span class="faint">${esc(f.brand)}</span>` : ''}</div>
         <div class="meta">${f.per.kcal} cal · ${esc(f.unit)}</div></div>
-      <input class="qty-mini" data-qty inputmode="decimal" value="1">
+      <input class="qty-mini" data-qty inputmode="decimal" value="${amt}"><span class="uom">${esc(u.label)}</span>
       <button class="btn primary add" data-add>Add</button>
-      <button class="icon-btn" data-del="${f.id}">${svg('trash')}</button></div>`).join('');
+      <button class="icon-btn" data-del="${f.id}">${svg('trash')}</button></div>`; }).join('');
   };
   draw();
   host.querySelector('#libsearch').addEventListener('input', (e) => draw(e.target.value));
@@ -514,8 +522,8 @@ async function subLibrary(host, back) {
     if (del) { await DB.deleteFood(del.dataset.del); const i = foods.findIndex((f) => f.id === del.dataset.del); if (i >= 0) foods.splice(i, 1); draw(host.querySelector('#libsearch').value); return; }
     const add = e.target.closest('[data-add]'); if (!add) return;
     const row = add.closest('[data-fid]'); const f = foods.find((x) => x.id === row.dataset.fid);
-    const qty = Number(row.querySelector('[data-qty]').value) || 1;
-    await addEntry({ name: f.name, unit: f.unit, qty, per: f.per, foodId: f.id });
+    const u = parseUnit(f.unit); const amount = Number(row.querySelector('[data-qty]').value) || u.num;
+    await addEntry({ name: f.name, unit: f.unit, qty: amount / u.num, per: f.per, foodId: f.id });
     closeSheet(back);
   });
 }
@@ -531,16 +539,17 @@ function subSearch(host) {
       try {
         const found = await searchFoods(q, S.settings.fdcKey);
         if (!found.length) { results.innerHTML = `<div class="empty">No results.</div>`; return; }
-        results.innerHTML = found.map((f, i) => `<div class="list-item" data-i="${i}" style="margin-bottom:8px">
+        results.innerHTML = found.map((f, i) => { const u = parseUnit(f.unit);
+          return `<div class="list-item" data-i="${i}" style="margin-bottom:8px">
           <div class="body"><div class="name">${esc(f.name)}${f.brand ? ` · <span class="faint">${esc(f.brand)}</span>` : ''}</div>
             <div class="meta">${f.per.kcal} cal · ${esc(f.unit)}</div></div>
-          <input class="qty-mini" data-qty inputmode="decimal" value="1">
-          <button class="btn primary add" data-add>Add</button></div>`).join('');
+          <input class="qty-mini" data-qty inputmode="decimal" value="${G(u.num)}"><span class="uom">${esc(u.label)}</span>
+          <button class="btn primary add" data-add>Add</button></div>`; }).join('');
         results.querySelectorAll('[data-i]').forEach((el) => {
           el.querySelector('[data-add]').onclick = async () => {
-            const f = found[Number(el.dataset.i)];
-            const qty = Number(el.querySelector('[data-qty]').value) || 1;
-            await addEntry({ name: f.name, unit: f.unit, qty, per: f.per, brand: f.brand, barcode: f.barcode });
+            const f = found[Number(el.dataset.i)]; const u = parseUnit(f.unit);
+            const amount = Number(el.querySelector('[data-qty]').value) || u.num;
+            await addEntry({ name: f.name, unit: f.unit, qty: amount / u.num, per: f.per, brand: f.brand, barcode: f.barcode });
             el.querySelector('[data-add]').textContent = 'Added';
           };
         });
@@ -561,12 +570,13 @@ async function subBarcode(host, back) {
     try {
       const f = await lookupBarcode(code);
       if (!f) { result.innerHTML = `<div class="empty">Not found (${esc(code)}). Add it manually instead.</div>`; return; }
+      const bu = parseUnit(f.unit);
       result.innerHTML = `<div class="list-item"><div class="body"><div class="name">${esc(f.name)}</div><div class="meta">${f.per.kcal} cal · ${esc(f.unit)}</div></div>
-        <input class="qty-mini" id="bqty" inputmode="decimal" value="1"></div>
+        <input class="qty-mini" id="bqty" inputmode="decimal" value="${G(bu.num)}"><span class="uom">${esc(bu.label)}</span></div>
         <button class="btn primary block" id="badd" style="margin-top:10px">Add</button>`;
       result.querySelector('#badd').onclick = async () => {
-        const qty = Number(result.querySelector('#bqty').value) || 1;
-        await addEntry({ name: f.name, unit: f.unit, qty, per: f.per, brand: f.brand, barcode: f.barcode }); closeSheet(back);
+        const amount = Number(result.querySelector('#bqty').value) || bu.num;
+        await addEntry({ name: f.name, unit: f.unit, qty: amount / bu.num, per: f.per, brand: f.brand, barcode: f.barcode }); closeSheet(back);
       };
     } catch { result.innerHTML = `<div class="empty">Lookup failed.</div>`; }
   }
@@ -939,8 +949,9 @@ async function addEntrySilent(a) {
   const date = (a.date && /^\d{4}-\d{2}-\d{2}$/.test(a.date)) ? a.date : S.date;
   const unit = a.unit || '1 serving';
   const per = { ...emptyPer(), ...a.per };
-  await DB.putEntry({ id: DB.uid(), date, name: a.name, unit, qty: Number(a.qty) || 1, per, order: await nextOrder(date) });
-  await ensureLibrary({ name: a.name, unit, per });
+  const qty = Number(a.qty) || 1;
+  await DB.putEntry({ id: DB.uid(), date, name: a.name, unit, qty, per, order: await nextOrder(date) });
+  await ensureLibrary({ name: a.name, unit, per, qty });
   return date;
 }
 function describeActions(actions) { return actions.map((a) => a.op === 'setQty' ? `• Set quantity to ${a.qty}` : a.op === 'delete' ? '• Remove an item' : a.op === 'add' ? `• Add ${esc(a.name)} (${a.per?.kcal || 0} cal)${a.date && a.date !== S.date ? ' on ' + dayLabel(a.date) : ''}` : '').join('<br>'); }
