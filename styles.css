@@ -254,8 +254,9 @@ input, textarea, select { outline: none; }
 @keyframes slideup { from { transform: translateY(100%); } }
 .sheet.full { height: 100dvh; max-height: 100dvh; border-radius: 0; }
 .sheet-head {
-  display: flex; align-items: center; gap: 10px; padding: 16px 16px 8px;
+  display: flex; align-items: center; gap: 4px; padding: 16px 16px 8px;
 }
+.sheet-head h2 { margin-right: auto; }
 .sheet-head h2 { font-size: 17px; font-weight: 700; margin: 0; flex: 1; min-width: 0; letter-spacing: -0.02em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sheet-head .icon-btn { flex: none; }
 .sheet-head .grip { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); width: 38px; height: 4px; border-radius: 3px; background: var(--line); }
@@ -292,8 +293,14 @@ input, textarea, select { outline: none; }
 .list-item .right { color: var(--text-faint); font-size: 13px; }
 .list-item > svg { width: 20px; height: 20px; flex: none; }
 .qty-mini { width: 46px; flex: none; text-align: center; background: var(--bg-elev); border: 1px solid var(--line); border-radius: 9px; padding: 9px 3px; color: var(--text); font-size: 15px; }
-.uom { flex: none; width: 46px; color: var(--text-faint); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.uom { flex: none; width: 42px; color: var(--text-faint); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .btn.add { flex: none; padding: 9px 12px; border-radius: 9px; font-size: 13.5px; }
+/* two-line add-food rows: name on its own line, controls aligned below */
+.food-add { flex-direction: column; align-items: stretch; gap: 8px; }
+.food-add .fa-name { font-weight: 600; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.food-add .fa-name .faint { font-weight: 400; }
+.food-add .fa-ctrls { display: flex; align-items: center; gap: 8px; }
+.food-add .fa-meta { flex: 1; min-width: 0; color: var(--text-faint); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ---------- Mini calendar (copy targets) ---------- */
 .cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }

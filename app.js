@@ -336,7 +336,7 @@ async function renderBody() {
       return `<div class="list-item" data-act="body-edit" data-date="${r.date}">
         ${thumb}
         <div class="body"><div class="name">${dayLabel(r.date)}</div><div class="meta">${fullDate(r.date)}</div></div>
-        <div class="right">${r.weight != null ? `${G(r.weight)} ${u.weight}` : '—'} · ${r.waist != null ? `${G(r.waist)} ${u.length}` : '—'}</div>
+        <div class="right">${[r.weight != null ? `${G(r.weight)} ${u.weight}` : '', r.waist != null ? `${G(r.waist)} ${u.length}` : ''].filter(Boolean).join(' · ')}</div>
       </div>`;
     }).join('');
   }
@@ -371,7 +371,7 @@ function statBlock(pts, unit) {
   const delta = G(last - first); const sign = delta > 0 ? '+' : '';
   return `<div class="stat-row" style="margin-bottom:10px">
     <div class="stat"><div class="v">${G(last)} <small>${unit}</small></div><div class="l">Latest</div></div>
-    <div class="stat"><div class="v">${G(Math.min(...pts.map(p=>p.y)))}–${G(Math.max(...pts.map(p=>p.y)))}</div><div class="l">Range</div></div>
+    <div class="stat"><div class="v">${G(Math.min(...pts.map(p=>p.y)))} to ${G(Math.max(...pts.map(p=>p.y)))}</div><div class="l">Range</div></div>
     <div class="stat"><div class="v">${sign}${delta} <small>${unit}</small></div><div class="l">Change</div></div>
   </div>`;
 }
@@ -499,7 +499,7 @@ async function subLibrary(host, back) {
       <input class="input" id="libsearch" placeholder="Filter your foods…" style="flex:2">
       <select class="select" id="libsort" style="flex:1">
         <option value="recent">Recent</option><option value="frequent">Frequent</option>
-        <option value="az">A–Z</option><option value="za">Z–A</option>
+        <option value="az">A to Z</option><option value="za">Z to A</option>
       </select>
     </div><div id="liblist"></div>`;
   const list = host.querySelector('#liblist');
@@ -508,12 +508,14 @@ async function subLibrary(host, back) {
     const filtered = foods.filter((f) => !q || (f.name + ' ' + (f.brand || '')).toLowerCase().includes(q.toLowerCase())).sort(sort);
     if (!filtered.length) { list.innerHTML = `<div class="empty">${foods.length ? 'No match.' : 'Your library is empty.<br>Foods you log are saved here for one-tap re-logging.'}</div>`; return; }
     list.innerHTML = filtered.map((f) => { const u = parseUnit(f.unit); const amt = G((f.lastQty || 1) * u.num);
-      return `<div class="list-item" data-fid="${f.id}" style="margin-bottom:8px">
-      <div class="body"><div class="name">${esc(f.name)}${f.brand ? ` · <span class="faint">${esc(f.brand)}</span>` : ''}</div>
-        <div class="meta">${f.per.kcal} cal · ${esc(f.unit)}</div></div>
-      <input class="qty-mini" data-qty inputmode="decimal" value="${amt}"><span class="uom">${esc(u.label)}</span>
-      <button class="btn primary add" data-add>Add</button>
-      <button class="icon-btn" data-del="${f.id}">${svg('trash')}</button></div>`; }).join('');
+      return `<div class="list-item food-add" data-fid="${f.id}" style="margin-bottom:8px">
+      <div class="fa-name">${esc(f.name)}${f.brand ? ` · <span class="faint">${esc(f.brand)}</span>` : ''}</div>
+      <div class="fa-ctrls">
+        <span class="fa-meta">${f.per.kcal} cal</span>
+        <input class="qty-mini" data-qty inputmode="decimal" value="${amt}"><span class="uom">${esc(u.label)}</span>
+        <button class="btn primary add" data-add>Add</button>
+        <button class="icon-btn" data-del="${f.id}">${svg('trash')}</button>
+      </div></div>`; }).join('');
   };
   draw();
   host.querySelector('#libsearch').addEventListener('input', (e) => draw(e.target.value));
@@ -541,11 +543,13 @@ function subSearch(host) {
         const found = await searchFoods(q, S.settings.fdcKey);
         if (!found.length) { results.innerHTML = `<div class="empty">No results.</div>`; return; }
         results.innerHTML = found.map((f, i) => { const u = parseUnit(f.unit);
-          return `<div class="list-item" data-i="${i}" style="margin-bottom:8px">
-          <div class="body"><div class="name">${esc(f.name)}${f.brand ? ` · <span class="faint">${esc(f.brand)}</span>` : ''}</div>
-            <div class="meta">${f.per.kcal} cal · ${esc(f.unit)}</div></div>
-          <input class="qty-mini" data-qty inputmode="decimal" value="${G(u.num)}"><span class="uom">${esc(u.label)}</span>
-          <button class="btn primary add" data-add>Add</button></div>`; }).join('');
+          return `<div class="list-item food-add" data-i="${i}" style="margin-bottom:8px">
+          <div class="fa-name">${esc(f.name)}${f.brand ? ` · <span class="faint">${esc(f.brand)}</span>` : ''}</div>
+          <div class="fa-ctrls">
+            <span class="fa-meta">${f.per.kcal} cal</span>
+            <input class="qty-mini" data-qty inputmode="decimal" value="${G(u.num)}"><span class="uom">${esc(u.label)}</span>
+            <button class="btn primary add" data-add>Add</button>
+          </div></div>`; }).join('');
         results.querySelectorAll('[data-i]').forEach((el) => {
           el.querySelector('[data-add]').onclick = async () => {
             const f = found[Number(el.dataset.i)]; const u = parseUnit(f.unit);
@@ -615,7 +619,7 @@ function subPhoto(host, back) {
       const checks = items.map((it, i) => `<label class="list-item" style="margin-bottom:8px">
         <input type="checkbox" data-i="${i}" checked style="width:20px;height:20px;accent-color:var(--cal)">
         <div class="body"><div class="name">${esc(it.name)}</div><div class="meta">${it.per.kcal} cal · ${esc(it.unit)}</div></div></label>`).join('');
-      result.innerHTML = `<div class="faint" style="font-size:13px;margin-bottom:8px">AI estimate — tap a food after adding to fine-tune.</div>${checks}
+      result.innerHTML = `<div class="faint" style="font-size:13px;margin-bottom:8px">AI estimate. Tap a food after adding to fine-tune.</div>${checks}
         <button class="btn primary block" id="padd" style="margin-top:8px">Add selected</button>`;
       result.querySelector('#padd').onclick = async () => {
         const chosen = [...result.querySelectorAll('input[type=checkbox]:checked')].map((c) => items[Number(c.dataset.i)]);
@@ -705,7 +709,11 @@ async function openEntryDetail(id) {
   back.querySelector('#qplus').onclick = () => { qtyIn.value = G((Number(qtyIn.value) || 0) + 0.5); drawTotals(); };
   back.querySelectorAll('[data-f]').forEach((el) => el.addEventListener('input', drawTotals));
 
-  back.querySelector('#dedit').onclick = () => back.querySelector('#editblock').classList.toggle('hidden');
+  back.querySelector('#dedit').onclick = () => {
+    const eb = back.querySelector('#editblock');
+    eb.classList.toggle('hidden');
+    if (!eb.classList.contains('hidden')) requestAnimationFrame(() => eb.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  };
   back.querySelector('#dsolve').onclick = () => { closeSheet(back); openSolver(e.id); };
   back.querySelector('#dsave').onclick = async () => {
     const data = readEntryForm(back, Number(qtyIn.value) || 0);
@@ -728,8 +736,7 @@ async function openSolver(entryId) {
   const defTarget = Math.max(0, Math.round(totals.kcal / 50) * 50) || 2000;
 
   const back = openSheet('Solve quantity', `
-    <div class="faint" style="font-size:14px">Pick a food and a target for the day — Macro Polo computes the quantity that hits it.</div>
-    <div class="field" style="margin-top:12px"><label>Adjust this food</label><select class="select" id="sitem">${itemOpts}</select></div>
+    <div class="field"><label>Adjust this food</label><select class="select" id="sitem">${itemOpts}</select></div>
     <div class="field-row" style="margin-top:10px">
       <div class="field"><label>Target metric</label><select class="select" id="smetric">${metricOpts}</select></div>
       <div class="field"><label>Target total</label><input class="input" id="starget" inputmode="decimal" value="${defTarget}"></div>
@@ -745,7 +752,7 @@ async function openSolver(entryId) {
     const others = totals[metric] - entryTotals(item)[metric];
     if (per <= 0) { out.innerHTML = `<div class="empty">“${esc(item.name)}” has no ${META[metric].label.toLowerCase()} per unit, so it can't be scaled for this target.</div>`; solution = null; back.querySelector('#sapply').disabled = true; return; }
     const needed = (target - others) / per;
-    if (needed < 0) { out.innerHTML = `<div class="empty">Even with 0 of “${esc(item.name)}”, the rest of the day is ${K(others)}${unitOf(metric)} — above ${K(target)}. Reduce another item.</div>`; solution = null; back.querySelector('#sapply').disabled = true; return; }
+    if (needed < 0) { out.innerHTML = `<div class="empty">Even with 0 of “${esc(item.name)}”, the rest of the day is ${K(others)}${unitOf(metric)}, already above ${K(target)}. Reduce another item.</div>`; solution = null; back.querySelector('#sapply').disabled = true; return; }
     const newQty = G(needed); const nt = {}; for (const k of NUTRIENTS) nt[k] = (totals[k] - entryTotals(item)[k]) + item.per[k] * needed;
     solution = { item, qty: newQty };
     out.innerHTML = `<div class="card tight">
@@ -817,7 +824,7 @@ function openCalendarPicker(title, sourceDate, onConfirm) {
 async function openBodyEdit(date) {
   const rec = (await DB.getBody(date)) || { date };
   const u = S.settings.units;
-  const back = openSheet(`Body — ${dayLabel(date)}`, `
+  const back = openSheet(`${dayLabel(date)}`, `
     <div class="faint">${fullDate(date)}</div>
     <div class="field-row" style="margin-top:12px">
       <div class="field"><label>Weight (${u.weight})</label><input class="input" id="ew" inputmode="decimal" value="${rec.weight ?? ''}"></div>
@@ -942,7 +949,7 @@ async function openChat() {
     }
     const others = [...touched].filter((d) => d !== S.date);
     S.pendingActions = null;
-    S.chat.push({ role: 'assistant', text: others.length ? `✓ Applied — added to ${others.map(dayLabel).join(', ')}. Switch the date to view those.` : `✓ Applied to ${dayLabel(S.date)}.` });
+    S.chat.push({ role: 'assistant', text: others.length ? `✓ Applied. Added to ${others.map(dayLabel).join(', ')}. Switch the date to view those.` : `✓ Applied to ${dayLabel(S.date)}.` });
     DB.saveChat(S.chat); draw(); render();
   }
 }
@@ -966,9 +973,9 @@ async function openSettings() {
     <div class="card tight">
       <div class="field"><label>API key (stored only on this device)</label><input class="input" id="setkey" type="password" placeholder="sk-ant-…" value="${esc(s.apiKey)}"></div>
       <div class="field" style="margin-top:10px"><label>Model</label><select class="select" id="setmodel">
-        ${modelOpt('claude-haiku-4-5-20251001', 'Haiku 4.5 — fast & cheap', s.model)}
-        ${modelOpt('claude-sonnet-4-6', 'Sonnet 4.6 — balanced', s.model)}
-        ${modelOpt('claude-opus-4-8', 'Opus 4.8 — most capable', s.model)}</select></div>
+        ${modelOpt('claude-haiku-4-5-20251001', 'Haiku 4.5 (fast, cheap)', s.model)}
+        ${modelOpt('claude-sonnet-4-6', 'Sonnet 4.6 (balanced)', s.model)}
+        ${modelOpt('claude-opus-4-8', 'Opus 4.8 (most capable)', s.model)}</select></div>
       <div class="faint" style="font-size:12px;margin-top:8px">Powers the dietician and photo estimates. Get a key at console.anthropic.com.</div>
     </div>
     <div class="section-title" style="margin-top:14px">Food search (USDA)</div>
@@ -1004,7 +1011,7 @@ async function openSettings() {
   back.querySelector('#importfile').onchange = async (e) => {
     const file = e.target.files[0]; if (!file) return;
     try { const data = JSON.parse(await file.text()); await DB.importAll(data, { merge: true }); S.settings = await DB.getSettings(); closeSheet(back); toast('Imported'); render(); }
-    catch { toast('Import failed — invalid file'); }
+    catch { toast('Import failed. Invalid file.'); }
   };
 }
 function modelOpt(id, label, cur) { return `<option value="${id}" ${cur === id ? 'selected' : ''}>${label}</option>`; }

@@ -82,7 +82,7 @@ export async function searchFoods(query, apiKey) {
   const key = (apiKey || '').trim() || 'DEMO_KEY';
   const url = `${FDC}?query=${encodeURIComponent(query)}&pageSize=25&api_key=${encodeURIComponent(key)}`;
   const res = await fetch(url);
-  if (res.status === 429) throw new Error('Search limit reached — add a free USDA key in Settings.');
+  if (res.status === 429) throw new Error('Search limit reached. Add a free USDA key in Settings.');
   if (!res.ok) throw new Error('Search failed');
   const data = await res.json();
   return (data.foods || [])

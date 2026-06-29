@@ -91,9 +91,11 @@ export async function chatComplete(history, dayContext, settings) {
 Today (${dayContext.date}):
 Current totals: ${JSON.stringify(dayContext.totals)}
 Logged items (id, name, qty x unit, per-unit nutrition):
-${dayContext.entries.map((e) => `- ${e.id}: ${e.name} — ${e.qty} x ${e.unit} @ ${JSON.stringify(e.per)}`).join('\n') || '(none)'}
+${dayContext.entries.map((e) => `- ${e.id}: ${e.name}, ${e.qty} x ${e.unit} @ ${JSON.stringify(e.per)}`).join('\n') || '(none)'}
 
-IMPORTANT: You can only PROPOSE changes — never say you have already added, logged, or saved anything. The user applies your proposal by tapping a button. Phrase it as "I'll add…", not "I've added…".
+IMPORTANT: You can only PROPOSE changes; never say you have already added, logged, or saved anything. The user applies your proposal by tapping a button. Phrase it as "I'll add...", not "I've added...".
+
+Never use em dashes or hyphens as punctuation in your replies. Use periods or commas instead.
 
 If the user shares a SCREENSHOT (e.g. a MyFitnessPal diary, a nutrition label, or a meal photo), read it carefully and extract each distinct food with its nutrition for the portion shown, then propose adding them via "add" actions. Briefly list what you found first.
 
@@ -124,6 +126,7 @@ To log for tomorrow, set "date" to ${dayContext.tomorrow}. setQty/delete only wo
   let clean = text
     .replace(/```[\s\S]*?```/g, '')                       // fenced code blocks
     .replace(/\[\s*\{\s*"op"[\s\S]*?\}\s*\]/g, '')          // bare action arrays
+    .replace(/\s*[—–]\s*/g, '. ')                          // strip em/en dashes
     .replace(/\n{3,}/g, '\n\n')
     .trim();
   return { text: clean || 'Done.', actions };
