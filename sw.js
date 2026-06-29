@@ -1,5 +1,5 @@
 // Macro Polo service worker — offline-first for the app shell.
-const CACHE = 'macropolo-v4';
+const CACHE = 'macropolo-v5';
 const SHELL = [
   './',
   './index.html',
@@ -10,8 +10,10 @@ const SHELL = [
   './ai.js',
   './food-data.js',
   './manifest.webmanifest',
-  './icons/icon.svg',
-  './icons/icon-maskable.svg',
+  './icons/icon-192.png',
+  './icons/icon-512.png',
+  './icons/icon-maskable-512.png',
+  './icons/apple-touch-icon.png',
 ];
 
 self.addEventListener('install', (e) => {
