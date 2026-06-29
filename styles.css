@@ -292,7 +292,7 @@ input, textarea, select { outline: none; }
 .list-item .right { color: var(--text-faint); font-size: 13px; }
 .list-item > svg { width: 20px; height: 20px; flex: none; }
 .qty-mini { width: 46px; flex: none; text-align: center; background: var(--bg-elev); border: 1px solid var(--line); border-radius: 9px; padding: 9px 3px; color: var(--text); font-size: 15px; }
-.uom { flex: none; color: var(--text-faint); font-size: 12px; max-width: 52px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.uom { flex: none; width: 46px; color: var(--text-faint); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .btn.add { flex: none; padding: 9px 12px; border-radius: 9px; font-size: 13.5px; }
 
 /* ---------- Mini calendar (copy targets) ---------- */
