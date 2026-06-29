@@ -1,5 +1,5 @@
 // app.js — Macro Polo main controller.
-const APP_VERSION = 'v23';
+const APP_VERSION = 'v24';
 import * as DB from './db.js';
 import { lineChart } from './charts.js';
 import * as AI from './ai.js';
@@ -1051,8 +1051,14 @@ async function openSettings() {
       <button class="btn sm" id="setinstall">Install app</button>
     </div>
     <input type="file" id="importfile" accept="application/json,.json" style="display:none">
-    <div class="faint center" style="font-size:12px;margin-top:14px">Macro Polo ${APP_VERSION} · all data stays on this device</div>
+    <button class="faint center" id="setver" style="font-size:12px;margin-top:14px;width:100%;background:none">Macro Polo ${APP_VERSION} · tap to force update</button>
   `, `<button class="btn ghost" data-close-foot>Cancel</button><button class="btn primary" id="setsave">Save</button>`);
+  back.querySelector('#setver').onclick = async () => {
+    toast('Updating…');
+    try { if ('serviceWorker' in navigator) { const regs = await navigator.serviceWorker.getRegistrations(); for (const r of regs) await r.unregister(); } } catch {}
+    try { if (window.caches) { for (const k of await caches.keys()) await caches.delete(k); } } catch {}
+    location.reload();
+  };
   back.querySelector('#setsave').onclick = async () => {
     s.apiKey = back.querySelector('#setkey').value.trim(); s.model = back.querySelector('#setmodel').value;
     s.fdcKey = back.querySelector('#setfdc').value.trim();
