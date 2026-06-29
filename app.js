@@ -1,6 +1,6 @@
 // app.js — Macro Polo main controller.
 import * as DB from './db.js';
-import { lineChart, macroDonut } from './charts.js';
+import { lineChart } from './charts.js';
 import * as AI from './ai.js';
 import { lookupBarcode, searchFoods } from './food-data.js';
 
@@ -50,6 +50,12 @@ function entryTotals(e) { const o = {}; for (const k of NUTRIENTS) o[k] = (e.per
 function sumTotals(entries) { const o = {}; for (const k of NUTRIENTS) o[k] = 0; for (const e of entries) { const t = entryTotals(e); for (const k of NUTRIENTS) o[k] += t[k]; } return o; }
 function K(n) { return Math.round(n || 0); }
 function G(n) { return Math.round((n || 0) * 10) / 10; }
+function nutrientRows(vals, keys) {
+  return keys.map((k) => { const n = META[k];
+    return `<div class="nut-row"><span class="dot" style="background:${n.color}"></span>
+      <span class="nl">${n.label}</span><span class="nv">${k === 'kcal' ? K(vals[k]) : G(vals[k])}<small>${n.unit}</small></span></div>`;
+  }).join('');
+}
 function portionText(e) { return (e.qty === 1 || e.qty == null) ? e.unit : `${G(e.qty)} × ${e.unit}`; }
 
 // ---------------- Icons ----------------
@@ -74,6 +80,7 @@ const I = {
   x: '<path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>',
   scale: '<path d="M12 4v3M7 7h10l3 8a4 4 0 0 1-8 0l3-8M7 7l-3 8a4 4 0 0 0 8 0L7 7Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>',
   calendar: '<rect x="3.5" y="5" width="17" height="16" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M3.5 9h17M8 3v4M16 3v4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+  calc: '<rect x="5" y="3" width="14" height="18" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/><rect x="8" y="6" width="8" height="3" rx="1" fill="currentColor"/><circle cx="9" cy="13" r="1.1" fill="currentColor"/><circle cx="12" cy="13" r="1.1" fill="currentColor"/><circle cx="15" cy="13" r="1.1" fill="currentColor"/><circle cx="9" cy="17" r="1.1" fill="currentColor"/><circle cx="12" cy="17" r="1.1" fill="currentColor"/><circle cx="15" cy="17" r="1.1" fill="currentColor"/>',
 };
 function svg(name, cls = '') { return `<svg class="${cls}" viewBox="0 0 24 24">${I[name]}</svg>`; }
 
@@ -94,10 +101,10 @@ function toast(msg, undoFn) {
   toastTimer = setTimeout(() => t.remove(), undoFn ? 5000 : 2200);
 }
 
-function openSheet(title, bodyHTML, footHTML) {
+function openSheet(title, bodyHTML, footHTML, headActions) {
   const back = node(`<div class="sheet-backdrop"><div class="sheet">
     <div class="sheet-head"><div class="grip"></div><h2>${esc(title)}</h2>
-      <button class="icon-btn" data-close>${svg('x')}</button></div>
+      ${headActions || ''}<button class="icon-btn" data-close>${svg('x')}</button></div>
     <div class="sheet-body">${bodyHTML}</div>
     ${footHTML ? `<div class="sheet-foot">${footHTML}</div>` : ''}
   </div></div>`);
@@ -177,10 +184,13 @@ async function renderFood() {
   const totals = sumTotals(entries);
 
   const chip = (k) => `<div class="macro-chip"><span class="dot" style="background:${META[k].color}"></span>
-    <div><div class="v">${G(totals[k])}<small>g</small></div><div class="l">${META[k].label}</div></div></div>`;
-
-  const summary = `<div class="card center">
-    <div class="donut-wrap">${macroDonut({ protein: totals.protein, carbs: totals.carbs, fat: totals.fat }, totals.kcal)}</div>
+    <div><div class="v">${K(totals[k])}<small>g</small></div><div class="l">${META[k].label}</div></div></div>`;
+  const mk = { carbs: totals.carbs * 4, protein: totals.protein * 4, fat: totals.fat * 9 };
+  const mkSum = (mk.carbs + mk.protein + mk.fat) || 1;
+  const seg = (k) => `<i style="width:${(mk[k] / mkSum) * 100}%;background:${META[k].color}"></i>`;
+  const summary = `<div class="card">
+    <div class="cal-top"><span class="cal-num">${K(totals.kcal)}</span><span class="cal-lbl">cal</span></div>
+    <div class="macro-seg">${seg('carbs')}${seg('protein')}${seg('fat')}</div>
     <div class="macro-chips">${chip('carbs')}${chip('protein')}${chip('fat')}</div>
   </div>`;
 
@@ -237,10 +247,6 @@ async function renderNutrients() {
   const dates = [];
   for (let d = start; d <= end; d = addDays(d, 1)) dates.push(d);
 
-  const rowsFor = (totals, keys) => keys.map((k) => { const n = META[k];
-    return `<div class="nut-row"><span class="dot" style="background:${n.color}"></span>
-      <span class="nl">${n.label}</span><span class="nv">${k === 'kcal' ? K(totals[k]) : G(totals[k])}<small>${n.unit}</small></span></div>`; }).join('');
-
   const panel = (d) => {
     const totals = sumTotals(byDate[d] || []);
     const count = (byDate[d] || []).length;
@@ -248,9 +254,9 @@ async function renderNutrients() {
       <div class="section-title">Calories</div>
       <div class="card cal-hero"><span class="v">${K(totals.kcal)}</span><span class="u">cal · ${count} item${count === 1 ? '' : 's'}</span></div>
       <div class="section-title">Macros</div>
-      <div class="card nut-rows">${rowsFor(totals, ['carbs', 'protein', 'fat'])}</div>
+      <div class="card nut-rows">${nutrientRows(totals, ['carbs', 'protein', 'fat'])}</div>
       <div class="section-title">Micronutrients</div>
-      <div class="card nut-rows">${rowsFor(totals, ['sodium', 'fiber', 'sugar'])}</div>
+      <div class="card nut-rows">${nutrientRows(totals, ['sodium', 'fiber', 'sugar'])}</div>
     </section>`;
   };
 
@@ -398,15 +404,21 @@ async function renderCharts() {
 // ---------------- Entry actions ----------------
 async function nextOrder(date) { const es = await DB.getEntries(date); return es.length ? Math.max(...es.map((e) => e.order || 0)) + 1 : 0; }
 
-async function addEntry({ name, unit, qty, per, foodId }) {
+async function addEntry({ name, unit, qty, per, foodId, brand, barcode }) {
   const entry = { id: DB.uid(), date: S.date, name, unit: unit || '1 serving', qty: qty || 1, per, foodId, order: await nextOrder(S.date) };
   await DB.putEntry(entry);
-  if (foodId) {
-    const foods = await DB.getFoods(); const f = foods.find((x) => x.id === foodId);
-    if (f) { f.useCount = (f.useCount || 0) + 1; f.lastUsed = Date.now(); await DB.putFood(f); }
-  }
+  await ensureLibrary({ name, unit: entry.unit, per, foodId, brand, barcode });
   toast(`Added ${name}`, async () => { await DB.deleteEntries([entry.id]); render(); });
   render();
+}
+
+// Every logged food becomes a reusable library item (deduped by name + unit).
+async function ensureLibrary({ name, unit, per, foodId, brand, barcode }) {
+  const foods = await DB.getFoods();
+  let f = foodId ? foods.find((x) => x.id === foodId) : null;
+  if (!f) f = foods.find((x) => x.nameLower === (name || '').toLowerCase() && (x.unit || '') === (unit || ''));
+  if (f) { f.useCount = (f.useCount || 0) + 1; f.lastUsed = Date.now(); await DB.putFood(f); }
+  else await DB.putFood({ id: DB.uid(), name, unit, per, brand, barcode, useCount: 1, lastUsed: Date.now() });
 }
 
 // ---------------- Add-food sheet ----------------
@@ -430,13 +442,27 @@ async function openAddFood() {
   loadSub('library');
 }
 
+const LIB_SORTS = {
+  recent: (a, b) => (b.lastUsed || 0) - (a.lastUsed || 0),
+  frequent: (a, b) => (b.useCount || 0) - (a.useCount || 0),
+  az: (a, b) => (a.name || '').localeCompare(b.name || ''),
+  za: (a, b) => (b.name || '').localeCompare(a.name || ''),
+};
+
 async function subLibrary(host, back) {
   const foods = await DB.getFoods();
-  host.innerHTML = `<input class="input" id="libsearch" placeholder="Filter your foods…" style="margin-bottom:10px"><div id="liblist"></div>`;
+  host.innerHTML = `<div class="field-row" style="margin-bottom:10px">
+      <input class="input" id="libsearch" placeholder="Filter your foods…" style="flex:2">
+      <select class="select" id="libsort" style="flex:1">
+        <option value="recent">Recent</option><option value="frequent">Frequent</option>
+        <option value="az">A–Z</option><option value="za">Z–A</option>
+      </select>
+    </div><div id="liblist"></div>`;
   const list = host.querySelector('#liblist');
   const draw = (q = '') => {
-    const filtered = foods.filter((f) => !q || (f.name + ' ' + (f.brand || '')).toLowerCase().includes(q.toLowerCase()));
-    if (!filtered.length) { list.innerHTML = `<div class="empty">${foods.length ? 'No match.' : 'Your library is empty.<br>Foods you add are saved here for one-tap re-logging.'}</div>`; return; }
+    const sort = LIB_SORTS[host.querySelector('#libsort').value] || LIB_SORTS.recent;
+    const filtered = foods.filter((f) => !q || (f.name + ' ' + (f.brand || '')).toLowerCase().includes(q.toLowerCase())).sort(sort);
+    if (!filtered.length) { list.innerHTML = `<div class="empty">${foods.length ? 'No match.' : 'Your library is empty.<br>Foods you log are saved here for one-tap re-logging.'}</div>`; return; }
     list.innerHTML = filtered.map((f) => `<div class="list-item" data-fid="${f.id}" style="margin-bottom:8px">
       <div class="body"><div class="name">${esc(f.name)}${f.brand ? ` · <span class="faint">${esc(f.brand)}</span>` : ''}</div>
         <div class="meta">${f.per.kcal} cal · ${esc(f.unit)}</div></div>
@@ -444,6 +470,7 @@ async function subLibrary(host, back) {
   };
   draw();
   host.querySelector('#libsearch').addEventListener('input', (e) => draw(e.target.value));
+  host.querySelector('#libsort').addEventListener('change', () => draw(host.querySelector('#libsearch').value));
   list.addEventListener('click', async (e) => {
     const del = e.target.closest('[data-del]');
     if (del) { await DB.deleteFood(del.dataset.del); const i = foods.findIndex((f) => f.id === del.dataset.del); if (i >= 0) foods.splice(i, 1); draw(host.querySelector('#libsearch').value); return; }
@@ -470,8 +497,7 @@ function subSearch(host) {
             <div class="meta">${f.per.kcal} cal · ${esc(f.unit)}</div></div>${svg('plus')}</div>`).join('');
         results.querySelectorAll('[data-i]').forEach((el) => el.onclick = async () => {
           const f = found[Number(el.dataset.i)];
-          await DB.putFood({ id: DB.uid(), name: f.name, brand: f.brand, unit: f.unit, per: f.per, barcode: f.barcode, useCount: 1, lastUsed: Date.now() });
-          await addEntry({ name: f.name, unit: f.unit, qty: 1, per: f.per });
+          await addEntry({ name: f.name, unit: f.unit, qty: 1, per: f.per, brand: f.brand, barcode: f.barcode });
           el.style.opacity = 0.4;
         });
       } catch { results.innerHTML = `<div class="empty">Search failed. Check your connection.</div>`; }
@@ -494,8 +520,7 @@ async function subBarcode(host, back) {
       result.innerHTML = `<div class="list-item"><div class="body"><div class="name">${esc(f.name)}</div><div class="meta">${f.per.kcal} cal · ${esc(f.unit)}</div></div></div>
         <button class="btn primary block" id="badd" style="margin-top:10px">Add</button>`;
       result.querySelector('#badd').onclick = async () => {
-        await DB.putFood({ id: DB.uid(), name: f.name, brand: f.brand, unit: f.unit, per: f.per, barcode: f.barcode, useCount: 1, lastUsed: Date.now() });
-        await addEntry({ name: f.name, unit: f.unit, qty: 1, per: f.per }); closeSheet(back);
+        await addEntry({ name: f.name, unit: f.unit, qty: 1, per: f.per, brand: f.brand, barcode: f.barcode }); closeSheet(back);
       };
     } catch { result.innerHTML = `<div class="empty">Lookup failed.</div>`; }
   }
@@ -546,13 +571,10 @@ function subPhoto(host, back) {
 
 function subManual(host, back) {
   host.innerHTML = entryForm({ name: '', unit: '1 serving', qty: 1, per: emptyPer() })
-    + `<button class="btn primary block" id="madd" style="margin-top:12px">Add food</button>
-       <label class="row-between" style="margin-top:12px;font-size:14px"><span class="muted">Also save to library</span>
-         <input type="checkbox" id="msave" checked style="width:20px;height:20px;accent-color:var(--cal)"></label>`;
+    + `<button class="btn primary block" id="madd" style="margin-top:12px">Add food</button>`;
   host.querySelector('#madd').onclick = async () => {
     const data = readEntryForm(host);
     if (!data.name) { toast('Name required'); return; }
-    if (host.querySelector('#msave').checked) await DB.putFood({ id: DB.uid(), name: data.name, unit: data.unit, per: data.per, useCount: 1, lastUsed: Date.now() });
     await addEntry({ name: data.name, unit: data.unit, qty: data.qty, per: data.per }); closeSheet(back);
   };
 }
@@ -584,31 +606,39 @@ function readEntryForm(root, qtyOverride) {
 async function openEntryDetail(id) {
   const entries = await DB.getEntries(S.date);
   const e = entries.find((x) => x.id === id); if (!e) return;
+  const headActions = `<button class="icon-btn" id="dsolve" title="Solve quantity">${svg('calc')}</button>
+    <button class="icon-btn" id="dedit" title="Edit details">${svg('edit')}</button>`;
   const back = openSheet(e.name || 'Item', `
     <div class="qty-stepper">
       <button class="step" id="qminus">${svg('minus')}</button>
       <div class="qty-mid"><input class="qty-in" id="dqty" inputmode="decimal" value="${G(e.qty)}"><div class="qty-unit" id="dunitlbl">${esc(e.unit)}</div></div>
       <button class="step" id="qplus">${svg('plus')}</button>
     </div>
-    <div class="card nut-rows" id="dtotals"></div>
-    <button class="btn block" id="dsolve" style="margin-top:12px">${svg('scale')} Solve quantity for a target…</button>
-    <details class="edit-details"><summary>Edit details</summary>
-      <div style="margin-top:12px">${entryForm(e, { noQty: true })}</div>
-    </details>
-    <button class="btn ghost block danger-text" id="ddel" style="margin-top:10px">${svg('trash')} Delete item</button>
-  `, `<button class="btn ghost" data-close-foot>Cancel</button><button class="btn primary" id="dsave">Save</button>`);
+    <div id="dtotals"></div>
+    <div id="editblock" class="hidden">
+      <div class="divider" style="margin:14px 0"></div>
+      ${entryForm(e, { noQty: true })}
+      <button class="btn ghost block danger-text" id="ddel" style="margin-top:12px">${svg('trash')} Delete item</button>
+    </div>
+  `, `<button class="btn ghost" data-close-foot>Cancel</button><button class="btn primary" id="dsave">Save</button>`, headActions);
 
   const qtyIn = back.querySelector('#dqty');
   const totalsEl = back.querySelector('#dtotals');
-  function curPer() { // read per from edit-details form (falls back to original)
+  function curPer() { // read per from edit form (falls back to original)
     const get = (k) => back.querySelector(`[data-f="${k}"]`)?.value;
     const per = {}; for (const k of NUTRIENTS) { const v = get(k); per[k] = v != null && v !== '' ? Number(v) || 0 : (e.per[k] || 0); }
     return per;
   }
   function drawTotals() {
     const qty = Number(qtyIn.value) || 0; const per = curPer();
-    totalsEl.innerHTML = NUT.map((n) => `<div class="nut-row"><span class="dot" style="background:${n.color}"></span>
-      <span class="nl">${n.label}</span><span class="nv">${n.k === 'kcal' ? K(per[n.k] * qty) : G(per[n.k] * qty)}<small>${n.unit}</small></span></div>`).join('');
+    const tot = {}; for (const k of NUTRIENTS) tot[k] = per[k] * qty;
+    totalsEl.innerHTML = `
+      <div class="section-title">Calories</div>
+      <div class="card cal-hero"><span class="v">${K(tot.kcal)}</span><span class="u">cal</span></div>
+      <div class="section-title">Macros</div>
+      <div class="card nut-rows">${nutrientRows(tot, ['carbs', 'protein', 'fat'])}</div>
+      <div class="section-title">Micros</div>
+      <div class="card nut-rows">${nutrientRows(tot, ['sodium', 'fiber', 'sugar'])}</div>`;
     const unitInput = back.querySelector('[data-f="unit"]');
     if (unitInput) back.querySelector('#dunitlbl').textContent = unitInput.value || e.unit;
   }
@@ -618,6 +648,8 @@ async function openEntryDetail(id) {
   back.querySelector('#qplus').onclick = () => { qtyIn.value = G((Number(qtyIn.value) || 0) + 0.5); drawTotals(); };
   back.querySelectorAll('[data-f]').forEach((el) => el.addEventListener('input', drawTotals));
 
+  back.querySelector('#dedit').onclick = () => back.querySelector('#editblock').classList.toggle('hidden');
+  back.querySelector('#dsolve').onclick = () => { closeSheet(back); openSolver(e.id); };
   back.querySelector('#dsave').onclick = async () => {
     const data = readEntryForm(back, Number(qtyIn.value) || 0);
     Object.assign(e, data);
@@ -628,7 +660,6 @@ async function openEntryDetail(id) {
     await DB.deleteEntries([e.id]); closeSheet(back);
     toast('Item deleted', async () => { await DB.putEntry(e); render(); }); render();
   };
-  back.querySelector('#dsolve').onclick = () => { closeSheet(back); openSolver(e.id); };
 }
 
 // ---------- Solver ----------
