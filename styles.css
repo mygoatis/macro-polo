@@ -363,6 +363,10 @@ input, textarea, select { outline: none; }
 .spinner { width: 18px; height: 18px; border: 2px solid var(--line); border-top-color: var(--cal); border-radius: 50%; animation: spin 0.7s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .row-between { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.solve-row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.solve-row .lbl { color: var(--text-dim); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.solve-row .val { font-size: 18px; font-weight: 700; white-space: nowrap; flex: none; }
+.solve-foot { font-size: 12.5px; margin-top: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tag { font-size: 11px; padding: 3px 8px; border-radius: 999px; background: var(--bg-elev-2); color: var(--text-dim); font-weight: 600; }
 .hidden { display: none !important; }
 .divider { height: 1px; background: var(--line-soft); margin: 4px 0; }

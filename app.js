@@ -755,10 +755,12 @@ async function openSolver(entryId) {
     if (needed < 0) { out.innerHTML = `<div class="empty">Even with 0 of “${esc(item.name)}”, the rest of the day is ${K(others)}${unitOf(metric)}, already above ${K(target)}. Reduce another item.</div>`; solution = null; back.querySelector('#sapply').disabled = true; return; }
     const newQty = G(needed); const nt = {}; for (const k of NUTRIENTS) nt[k] = (totals[k] - entryTotals(item)[k]) + item.per[k] * needed;
     solution = { item, qty: newQty };
+    const u = parseUnit(item.unit);
     out.innerHTML = `<div class="card tight">
-      <div class="row-between"><span class="muted">${esc(item.name)}</span><b style="font-size:18px">${G(item.qty)} → ${newQty} × ${esc(item.unit)}</b></div>
-      <div class="divider"></div><div class="row-between"><span class="muted">Day ${META[metric].label.toLowerCase()}</span><b>${K(totals[metric])} → ${K(nt[metric])}${unitOf(metric)}</b></div>
-      <div class="faint" style="font-size:12.5px;margin-top:8px">New day: ${K(nt.kcal)} cal · P${G(nt.protein)} C${G(nt.carbs)} F${G(nt.fat)}</div></div>`;
+      <div class="solve-row"><span class="lbl">${esc(item.name)}</span><b class="val">${G(item.qty * u.num)} to ${G(needed * u.num)} ${esc(u.label)}</b></div>
+      <div class="divider"></div>
+      <div class="solve-row"><span class="lbl">Day ${META[metric].label.toLowerCase()}</span><b class="val">${K(totals[metric])} to ${K(nt[metric])}${unitOf(metric)}</b></div>
+      <div class="solve-foot faint">New day: ${K(nt.kcal)} cal · P${G(nt.protein)} C${G(nt.carbs)} F${G(nt.fat)}</div></div>`;
     back.querySelector('#sapply').disabled = false;
   }
   ['#sitem', '#smetric', '#starget'].forEach((sel) => back.querySelector(sel).addEventListener('input', compute));
