@@ -155,11 +155,11 @@ export function lineChart(rawPoints, opts = {}) {
     </defs>
     ${grid}
     ${vgrid}
-    <path d="${areaPath}" fill="url(#${id})"/>
-    <path d="${path}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="${areaPath}" fill="url(#${id})" class="area-fade"/>
+    <path d="${path}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="line-draw" pathLength="1"/>
     ${dots}
     <circle cx="${last.x}" cy="${last.y}" r="5" fill="${color}"/>
-    <circle cx="${last.x}" cy="${last.y}" r="9" fill="${color}" opacity="0.2"/>
+    <circle cx="${last.x}" cy="${last.y}" r="9" fill="${color}" opacity="0.2" class="dot-pulse"/>
     ${xlabels}
   </svg></div>`;
 }

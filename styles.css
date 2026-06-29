@@ -373,6 +373,41 @@ input, textarea, select { outline: none; }
 a { color: var(--protein); }
 .danger-text { color: var(--danger); }
 
+/* ---------- Delight animations (respect reduced-motion) ---------- */
+.cal-float { position: absolute; font-weight: 700; color: var(--cal); font-size: 14px; pointer-events: none; white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) { .cal-float { display: none; } }
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes mp-fade { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes mp-line { to { stroke-dashoffset: 0; } }
+  @keyframes mp-dot { 0% { opacity: 0; transform: scale(.3); } 55% { opacity: .28; } 100% { opacity: .2; transform: scale(1); } }
+  @keyframes mp-entry { from { opacity: 0; transform: translateY(-8px) scale(.985); } to { opacity: 1; transform: none; } }
+  @keyframes mp-pop { from { transform: scale(.4); } to { transform: scale(1); } }
+  @keyframes mp-row { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  @keyframes mp-next { from { opacity: .35; transform: translateX(22px); } to { opacity: 1; transform: none; } }
+  @keyframes mp-prev { from { opacity: .35; transform: translateX(-22px); } to { opacity: 1; transform: none; } }
+  @keyframes mp-float { from { opacity: .95; transform: translateY(0); } to { opacity: 0; transform: translateY(-28px); } }
+
+  .chart-wrap .line-draw { stroke-dasharray: 1; stroke-dashoffset: 1; animation: mp-line .7s ease forwards; }
+  .chart-wrap .area-fade { animation: mp-fade .7s ease forwards; }
+  .chart-wrap .dot-pulse { transform-box: fill-box; transform-origin: center; animation: mp-dot .85s ease forwards; }
+
+  .macro-seg.grow > i { transition: width .55s cubic-bezier(.2,.8,.2,1); }
+  .entry-enter { animation: mp-entry .32s cubic-bezier(.2,.8,.2,1); }
+  .entry.sel .check { animation: mp-pop .26s cubic-bezier(.2,1.5,.45,1); }
+
+  .sheet-body > * { animation: mp-row .34s ease both; }
+  .sheet-body > *:nth-child(1) { animation-delay: .02s; }
+  .sheet-body > *:nth-child(2) { animation-delay: .06s; }
+  .sheet-body > *:nth-child(3) { animation-delay: .10s; }
+  .sheet-body > *:nth-child(4) { animation-delay: .14s; }
+  .sheet-body > *:nth-child(n+5) { animation-delay: .17s; }
+
+  .screen.slide-next { animation: mp-next .3s ease; }
+  .screen.slide-prev { animation: mp-prev .3s ease; }
+  .btn-pop { animation: mp-pop .28s cubic-bezier(.2,1.5,.45,1); }
+  .cal-float { animation: mp-float 1s ease forwards; }
+}
+
 /* ---------- Macro donut summary ---------- */
 .donut-wrap { display: flex; justify-content: center; padding: 6px 0 4px; }
 .donut-wrap svg { width: 168px; height: 168px; }

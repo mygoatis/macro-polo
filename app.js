@@ -136,6 +136,34 @@ function initBackButton() {
   });
 }
 
+// ---------------- Delight animations ----------------
+const REDUCE = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+let foodPrev = null;     // previous food totals (for count-up)
+let foodAnim = null;     // animation payload for the food afterRender hook
+let enterEntryId = null; // newly added entry id to animate in
+let pendingGain = 0;     // +cal amount to float up
+let dateDir = 0;         // -1 = previous day, +1 = next day
+function haptic(ms) { try { if (navigator.vibrate) navigator.vibrate(ms || 8); } catch {} }
+function countUp(el, to, from) {
+  if (!el) return; to = Math.round(to || 0); from = Math.round(from || 0);
+  if (REDUCE || from === to) { el.textContent = to; return; }
+  const dur = 450, t0 = performance.now();
+  (function step(t) {
+    const p = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - p, 3);
+    el.textContent = Math.round(from + (to - from) * e);
+    if (p < 1) requestAnimationFrame(step); else el.textContent = to;
+  })(t0);
+}
+function floatGain(g) {
+  const top = $app.querySelector('.cal-top'), num = $app.querySelector('.cal-num');
+  if (!top || !num || g <= 0) return;
+  top.style.position = 'relative';
+  const f = document.createElement('span');
+  f.className = 'cal-float'; f.textContent = '+' + g + ' cal';
+  f.style.left = (num.offsetWidth + 10) + 'px'; f.style.top = '2px';
+  top.appendChild(f); f.addEventListener('animationend', () => f.remove());
+}
+
 // ---------------- Render ----------------
 async function render() {
   if (!S.settings) S.settings = await DB.getSettings();
@@ -147,6 +175,15 @@ async function render() {
   $app.innerHTML = header() + bodyHTML + tabbar();
   renderSelbar();
   saveUI();
+  if (S.tab === 'food' && foodAnim && foodAnim.animate) {
+    const fa = foodAnim;
+    countUp($app.querySelector('.cal-num'), fa.totals.kcal, fa.prev.kcal);
+    const nums = $app.querySelectorAll('.macro-chip .num');
+    ['carbs', 'protein', 'fat'].forEach((k, i) => countUp(nums[i], fa.totals[k], fa.prev[k]));
+    requestAnimationFrame(() => $app.querySelectorAll('.macro-seg.grow > i').forEach((el) => { el.style.width = el.dataset.w + '%'; }));
+    if (pendingGain > 0) floatGain(pendingGain);
+  }
+  pendingGain = 0; foodAnim = null;
   if (S.tab === 'nutrients') {
     const sc = document.getElementById('nutscroll');
     const target = sc?.querySelector(`[data-date="${S.date}"]`) || sc?.lastElementChild;
@@ -204,14 +241,22 @@ async function renderFood() {
   const entries = await DB.getEntries(S.date);
   const totals = sumTotals(entries);
 
+  // decide whether to animate (only when the day's totals actually changed)
+  const changed = !foodPrev || NUTRIENTS.some((k) => K(foodPrev[k]) !== K(totals[k]));
+  const animate = !REDUCE && changed;
+  foodAnim = { animate, totals, prev: foodPrev || {} };
+  foodPrev = totals;
+  const enterId = enterEntryId; enterEntryId = null;
+  const slideCls = dateDir > 0 ? ' slide-next' : dateDir < 0 ? ' slide-prev' : ''; dateDir = 0;
+
   const chip = (k) => `<div class="macro-chip"><span class="dot" style="background:${META[k].color}"></span>
-    <div><div class="v">${K(totals[k])}<small>g</small></div><div class="l">${META[k].label}</div></div></div>`;
+    <div><div class="v"><span class="num">${K(totals[k])}</span><small>g</small></div><div class="l">${META[k].label}</div></div></div>`;
   const mk = { carbs: totals.carbs * 4, protein: totals.protein * 4, fat: totals.fat * 9 };
   const mkSum = (mk.carbs + mk.protein + mk.fat) || 1;
-  const seg = (k) => `<i style="width:${(mk[k] / mkSum) * 100}%;background:${META[k].color}"></i>`;
+  const seg = (k) => { const pct = (mk[k] / mkSum) * 100; return `<i data-w="${pct}" style="width:${animate ? 0 : pct}%;background:${META[k].color}"></i>`; };
   const summary = `<div class="card">
     <div class="cal-top"><span class="cal-num">${K(totals.kcal)}</span><span class="cal-lbl">cal</span></div>
-    <div class="macro-seg">${seg('carbs')}${seg('protein')}${seg('fat')}</div>
+    <div class="macro-seg${animate ? ' grow' : ''}">${seg('carbs')}${seg('protein')}${seg('fat')}</div>
     <div class="macro-chips">${chip('carbs')}${chip('protein')}${chip('fat')}</div>
   </div>`;
 
@@ -224,7 +269,7 @@ async function renderFood() {
   for (const e of entries) {
     const t = entryTotals(e);
     const sel = S.selection.has(e.id);
-    listHTML += `<div class="entry ${sel ? 'sel' : ''}" data-act="entry" data-id="${e.id}">
+    listHTML += `<div class="entry ${sel ? 'sel' : ''}${e.id === enterId ? ' entry-enter' : ''}" data-act="entry" data-id="${e.id}">
       <button class="check" data-act="toggle" data-id="${e.id}">${sel ? svg('check') : ''}</button>
       <div class="body"><div class="name">${esc(e.name)}</div><div class="meta">${esc(portionText(e))}</div></div>
       <div class="entry-stats">
@@ -237,7 +282,7 @@ async function renderFood() {
   }
   if (!entries.length) listHTML = `<div class="empty">Nothing logged yet.<br>Tap “Add food” to start.</div>`;
 
-  return `<div class="screen">${summary}${actions}<div>${listHTML}</div></div>`;
+  return `<div class="screen${slideCls}">${summary}${actions}<div>${listHTML}</div></div>`;
 }
 
 function renderSelbar() {
@@ -429,6 +474,9 @@ async function addEntry({ name, unit, qty, per, foodId, brand, barcode }) {
   const entry = { id: DB.uid(), date: S.date, name, unit: unit || '1 serving', qty: qty || 1, per, foodId, order: await nextOrder(S.date) };
   await DB.putEntry(entry);
   await ensureLibrary({ name, unit: entry.unit, per, foodId, brand, barcode, qty: entry.qty });
+  enterEntryId = entry.id;
+  pendingGain = K((per?.kcal || 0) * entry.qty);
+  haptic(8);
   toast(`Added ${name}`, async () => { await DB.deleteEntries([entry.id]); render(); });
   render();
 }
@@ -950,7 +998,7 @@ async function openChat() {
       else if (act.op === 'add') { touched.add(await addEntrySilent(act)); }
     }
     const others = [...touched].filter((d) => d !== S.date);
-    S.pendingActions = null;
+    S.pendingActions = null; haptic(10);
     S.chat.push({ role: 'assistant', text: others.length ? `✓ Applied. Added to ${others.map(dayLabel).join(', ')}. Switch the date to view those.` : `✓ Applied to ${dayLabel(S.date)}.` });
     DB.saveChat(S.chat); draw(); render();
   }
@@ -1063,8 +1111,8 @@ document.addEventListener('click', async (e) => {
     case 'tab': if (t.dataset.tab !== S.tab) tabHistory.push(S.tab); S.tab = t.dataset.tab; S.selection.clear(); render(); break;
     case 'settings': openSettings(); break;
     case 'chat': openChat(); break;
-    case 'date-prev': S.date = addDays(S.date, -1); S.selection.clear(); render(); break;
-    case 'date-next': S.date = addDays(S.date, 1); S.selection.clear(); render(); break;
+    case 'date-prev': dateDir = -1; S.date = addDays(S.date, -1); S.selection.clear(); render(); break;
+    case 'date-next': dateDir = 1; S.date = addDays(S.date, 1); S.selection.clear(); render(); break;
     case 'date-pick': { const dp = document.getElementById('datepick'); dp.showPicker ? dp.showPicker() : dp.click(); break; }
     case 'add-food': openAddFood(); break;
     case 'copy-day': openCopyDay(); break;
@@ -1101,13 +1149,16 @@ document.addEventListener('change', async (e) => {
 async function deleteSelected() {
   const ids = [...S.selection]; const entries = await DB.getEntries(S.date);
   const removed = entries.filter((e) => ids.includes(e.id)); await DB.deleteEntries(ids); S.selection.clear();
+  haptic(14);
   toast(`Deleted ${ids.length} item${ids.length > 1 ? 's' : ''}`, async () => { await DB.putEntries(removed); render(); }); render();
 }
 async function saveBodyQuick() {
   const w = document.getElementById('qw').value.trim(), s = document.getElementById('qs').value.trim();
   const cur = (await DB.getBody(S.date)) || { date: S.date };
   await DB.putBody({ ...cur, date: S.date, weight: w === '' ? null : Number(w), waist: s === '' ? null : Number(s) });
-  toast('Saved'); render();
+  const btn = document.querySelector('[data-act="body-save"]');
+  if (btn && !REDUCE) { btn.classList.remove('btn-pop'); void btn.offsetWidth; btn.classList.add('btn-pop'); }
+  haptic(10); toast('Saved'); render();
 }
 function setBodyRange(r) { S.body.mode = r; if (r === 'custom' && !S.body.from) { S.body.from = addDays(todayStr(), -30); S.body.to = todayStr(); } render(); }
 function setChartRange(r) { S.chart.mode = r; if (r === 'custom' && !S.chart.from) { S.chart.from = addDays(todayStr(), -30); S.chart.to = todayStr(); } render(); }
