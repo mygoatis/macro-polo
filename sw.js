@@ -1,5 +1,5 @@
 // Macro Polo service worker — offline-first for the app shell.
-const CACHE = 'macropolo-v8';
+const CACHE = 'macropolo-v9';
 const SHELL = [
   './',
   './index.html',
