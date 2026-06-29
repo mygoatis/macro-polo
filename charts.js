@@ -108,15 +108,37 @@ export function lineChart(rawPoints, opts = {}) {
     grid += `<text x="${padL-8}" y="${y+4}" fill="var(--text-faint)" font-size="12" text-anchor="end">${fmtNum(v)}</text>`;
   }
 
-  // x labels — first, middle-ish, last (avoid clutter)
-  const labelIdx = points.length <= 3
-    ? points.map((_, i) => i)
-    : [0, Math.floor((points.length - 1) / 2), points.length - 1];
-  let xlabels = '';
-  for (const i of [...new Set(labelIdx)]) {
-    const px = scaled[i].x;
-    const anchor = i === 0 ? 'start' : i === points.length - 1 ? 'end' : 'middle';
-    xlabels += `<text x="${px}" y="${H-6}" fill="var(--text-faint)" font-size="12" text-anchor="${anchor}">${fmtDate(points[i].x)}</text>`;
+  // x labels + faint vertical guides
+  const firstDN = dayNum(points[0].x), lastDN = dayNum(points[points.length - 1].x);
+  const spanDays = lastDN - firstDN;
+  const usableW = W - padL - padR;
+  let xlabels = '', vgrid = '';
+  const place = (px, text, anchor) => {
+    vgrid += `<line x1="${px}" y1="${padT}" x2="${px}" y2="${H - padB}" stroke="var(--line-soft)" stroke-width="1"/>`;
+    xlabels += `<text x="${px}" y="${H - 6}" fill="var(--text-faint)" font-size="12" text-anchor="${anchor}">${text}</text>`;
+  };
+  if (spanDays > 380) {
+    // multi-year: a tick per year (as many as fit)
+    const y0 = +points[0].x.slice(0, 4), y1 = +points[points.length - 1].x.slice(0, 4);
+    const maxYears = Math.max(2, Math.floor(usableW / 42));
+    const stepY = Math.ceil((y1 - y0 + 1) / maxYears);
+    for (let y = y0; y <= y1; y += stepY) {
+      let dn = dayNum(`${y}-01-01`);
+      if (dn < firstDN) dn = firstDN;
+      if (dn > lastDN) break;
+      const px = sx(dn);
+      const anchor = px <= padL + 16 ? 'start' : px >= W - padR - 16 ? 'end' : 'middle';
+      place(px, String(y), anchor);
+    }
+  } else {
+    const n = points.length;
+    const count = Math.min(Math.max(4, Math.floor(usableW / 72)), n);
+    for (let i = 0; i < count; i++) {
+      const idx = count === 1 ? 0 : Math.round((i * (n - 1)) / (count - 1));
+      const px = scaled[idx].x;
+      const anchor = i === 0 ? 'start' : i === count - 1 ? 'end' : 'middle';
+      place(px, fmtDate(points[idx].x), anchor);
+    }
   }
 
   const last = scaled[scaled.length - 1];
@@ -132,6 +154,7 @@ export function lineChart(rawPoints, opts = {}) {
       </linearGradient>
     </defs>
     ${grid}
+    ${vgrid}
     <path d="${areaPath}" fill="url(#${id})"/>
     <path d="${path}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
     ${dots}
