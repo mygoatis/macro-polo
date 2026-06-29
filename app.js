@@ -151,7 +151,7 @@ function dateNav() {
 function header() {
   if (S.tab === 'food') {
     return `<div class="app-header">
-      <div class="row"><h1>Macro Polo</h1>
+      <div class="row"><img class="brand-mark" src="icons/mark.png" alt=""><h1>Macro Polo</h1>
         <button class="icon-btn" data-act="chat" title="Dietician">${svg('spark')}</button>
         <button class="icon-btn" data-act="settings">${svg('gear')}</button></div>
       ${dateNav()}</div>`;

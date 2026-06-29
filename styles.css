@@ -89,6 +89,7 @@ input, textarea, select { outline: none; }
 }
 .app-header .row { display: flex; align-items: center; gap: 10px; }
 .app-header h1 { font-size: 19px; font-weight: 700; margin: 0; letter-spacing: -0.02em; flex: 1; }
+.brand-mark { height: 28px; width: auto; display: block; flex: none; }
 .icon-btn {
   width: 40px; height: 40px; border-radius: 12px;
   display: grid; place-items: center; color: var(--text-dim);
