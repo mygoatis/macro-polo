@@ -89,7 +89,13 @@ input, textarea, select { outline: none; }
 }
 .app-header .row { display: flex; align-items: center; gap: 10px; }
 .app-header h1 { font-size: 19px; font-weight: 700; margin: 0; letter-spacing: -0.02em; flex: 1; }
-.brand-mark { height: 28px; width: auto; display: block; flex: none; }
+.brand-mark {
+  width: 16px; height: 28px; display: block; flex: none;
+  background-color: var(--cal); /* green in light mode */
+  -webkit-mask: url('icons/mark.png') no-repeat center / contain;
+  mask: url('icons/mark.png') no-repeat center / contain;
+}
+@media (prefers-color-scheme: dark) { .brand-mark { background-color: #f2f4f8; } }
 .icon-btn {
   width: 40px; height: 40px; border-radius: 12px;
   display: grid; place-items: center; color: var(--text-dim);
