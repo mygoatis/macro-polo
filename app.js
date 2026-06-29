@@ -116,6 +116,7 @@ async function render() {
   else if (S.tab === 'charts') bodyHTML = await renderCharts();
   $app.innerHTML = header() + bodyHTML + tabbar();
   renderSelbar();
+  saveUI();
   if (S.tab === 'nutrients') {
     const sc = document.getElementById('nutscroll');
     const target = sc?.querySelector(`[data-date="${S.date}"]`) || sc?.lastElementChild;
@@ -822,30 +823,38 @@ async function openChat() {
     if (!text && !img) return;
     if (!S.settings.apiKey) { S.chat.push({ role: 'assistant', text: 'Add your Claude API key in Settings first.' }); draw(); return; }
     S.chat.push({ role: 'user', text, image: img }); input.value = ''; input.style.height = 'auto';
-    pendingImage = null; drawPreview(); S.pendingActions = null; draw();
+    pendingImage = null; drawPreview(); S.pendingActions = null; DB.saveChat(S.chat); draw();
     log.innerHTML += `<div class="msg ai thinking"><span class="spinner"></span></div>`; log.scrollTop = log.scrollHeight;
     try {
       const entries = await DB.getEntries(S.date);
-      const ctx = { date: S.date, totals: roundTotals(sumTotals(entries)), entries: entries.map((e) => ({ id: e.id, name: e.name, qty: e.qty, unit: e.unit, per: e.per })) };
+      const ctx = { date: S.date, tomorrow: addDays(S.date, 1), totals: roundTotals(sumTotals(entries)), entries: entries.map((e) => ({ id: e.id, name: e.name, qty: e.qty, unit: e.unit, per: e.per })) };
       const { text: reply, actions } = await AI.chatComplete(S.chat, ctx, S.settings);
       S.chat.push({ role: 'assistant', text: reply }); S.pendingActions = actions && actions.length ? actions : null;
     } catch (err) { S.chat.push({ role: 'assistant', text: '⚠️ ' + err.message }); }
-    draw();
+    DB.saveChat(S.chat); draw();
   }
   back.querySelector('#chatsend').onclick = send;
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
   async function applyActions() {
     const entries = await DB.getEntries(S.date);
+    const touched = new Set();
     for (const act of S.pendingActions) {
-      if (act.op === 'setQty') { const e = entries.find((x) => x.id === act.entryId); if (e) { e.qty = Number(act.qty); await DB.putEntry(e); } }
-      else if (act.op === 'delete') await DB.deleteEntries([act.entryId]);
-      else if (act.op === 'add') await addEntrySilent(act);
+      if (act.op === 'setQty') { const e = entries.find((x) => x.id === act.entryId); if (e) { e.qty = Number(act.qty); await DB.putEntry(e); touched.add(S.date); } }
+      else if (act.op === 'delete') { await DB.deleteEntries([act.entryId]); touched.add(S.date); }
+      else if (act.op === 'add') { touched.add(await addEntrySilent(act)); }
     }
-    S.pendingActions = null; S.chat.push({ role: 'assistant', text: '✓ Applied.' }); draw(); render();
+    const others = [...touched].filter((d) => d !== S.date);
+    S.pendingActions = null;
+    S.chat.push({ role: 'assistant', text: others.length ? `✓ Applied — added to ${others.map(dayLabel).join(', ')}. Switch the date to view those.` : `✓ Applied to ${dayLabel(S.date)}.` });
+    DB.saveChat(S.chat); draw(); render();
   }
 }
-async function addEntrySilent(a) { await DB.putEntry({ id: DB.uid(), date: S.date, name: a.name, unit: a.unit || '1 serving', qty: Number(a.qty) || 1, per: { ...emptyPer(), ...a.per }, order: await nextOrder(S.date) }); }
-function describeActions(actions) { return actions.map((a) => a.op === 'setQty' ? `• Set quantity to ${a.qty}` : a.op === 'delete' ? '• Remove an item' : a.op === 'add' ? `• Add ${esc(a.name)} (${a.per?.kcal || 0} cal)` : '').join('<br>'); }
+async function addEntrySilent(a) {
+  const date = (a.date && /^\d{4}-\d{2}-\d{2}$/.test(a.date)) ? a.date : S.date;
+  await DB.putEntry({ id: DB.uid(), date, name: a.name, unit: a.unit || '1 serving', qty: Number(a.qty) || 1, per: { ...emptyPer(), ...a.per }, order: await nextOrder(date) });
+  return date;
+}
+function describeActions(actions) { return actions.map((a) => a.op === 'setQty' ? `• Set quantity to ${a.qty}` : a.op === 'delete' ? '• Remove an item' : a.op === 'add' ? `• Add ${esc(a.name)} (${a.per?.kcal || 0} cal)${a.date && a.date !== S.date ? ' on ' + dayLabel(a.date) : ''}` : '').join('<br>'); }
 function roundTotals(t) { const o = {}; for (const k of NUTRIENTS) o[k] = K(t[k]); return o; }
 
 // ---------- Settings ----------
@@ -993,5 +1002,18 @@ async function saveBodyQuick() {
 function setBodyRange(r) { S.body.mode = r; if (r === 'custom' && !S.body.from) { S.body.from = addDays(todayStr(), -30); S.body.to = todayStr(); } render(); }
 function setChartRange(r) { S.chart.mode = r; if (r === 'custom' && !S.chart.from) { S.chart.from = addDays(todayStr(), -30); S.chart.to = todayStr(); } render(); }
 
+// ---------------- Persistence of lightweight UI state ----------------
+function loadUI() {
+  try {
+    const u = JSON.parse(localStorage.getItem('mp.ui') || '{}');
+    if (u.date) S.date = u.date;
+    if (u.tab && ['food', 'nutrients', 'body', 'charts'].includes(u.tab)) S.tab = u.tab;
+  } catch {}
+}
+function saveUI() {
+  try { localStorage.setItem('mp.ui', JSON.stringify({ date: S.date, tab: S.tab })); } catch {}
+}
+
 // ---------------- Boot ----------------
-render();
+loadUI();
+(async () => { try { S.chat = await DB.getChat(); } catch {} render(); })();

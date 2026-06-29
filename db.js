@@ -148,6 +148,17 @@ export async function saveSettings(s) {
   return s;
 }
 
+// ---------- Chat (persisted in the settings store under its own key) ----------
+export async function getChat() {
+  const store = await tx('settings', 'readonly');
+  const r = await reqP(store.get('chat'));
+  return (r && r.messages) || [];
+}
+export async function saveChat(messages) {
+  const store = await tx('settings', 'readwrite');
+  await reqP(store.put({ key: 'chat', messages }));
+}
+
 // ---------- Export / Import ----------
 export async function exportAll() {
   const [entries, foods, body, settings] = await Promise.all([

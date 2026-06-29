@@ -93,13 +93,15 @@ Current totals: ${JSON.stringify(dayContext.totals)}
 Logged items (id, name, qty x unit, per-unit nutrition):
 ${dayContext.entries.map((e) => `- ${e.id}: ${e.name} — ${e.qty} x ${e.unit} @ ${JSON.stringify(e.per)}`).join('\n') || '(none)'}
 
-If the user shares a SCREENSHOT (e.g. a MyFitnessPal diary, a nutrition label, or a meal photo), read it carefully and extract each distinct food with its nutrition for the portion shown, then propose adding them via "add" actions (see below). Briefly list what you found first.
+IMPORTANT: You can only PROPOSE changes — never say you have already added, logged, or saved anything. The user applies your proposal by tapping a button. Phrase it as "I'll add…", not "I've added…".
 
-When the user asks you to change the day (e.g. "scale the rice so I hit 2400 kcal", "add a snack to reach 180g protein"), do the math precisely and then, AFTER your short explanation, output a fenced code block labelled tally-actions containing a JSON array of actions. Action shapes:
-{"op":"setQty","entryId":"<id>","qty":<number>}
+If the user shares a SCREENSHOT (e.g. a MyFitnessPal diary, a nutrition label, or a meal photo), read it carefully and extract each distinct food with its nutrition for the portion shown, then propose adding them via "add" actions. Briefly list what you found first.
+
+When changing the day or adding foods, do the math precisely, give a short explanation, then output a fenced code block labelled tally-actions containing a JSON array of actions. Today is ${dayContext.date}; tomorrow is ${dayContext.tomorrow}. Action shapes:
+{"op":"setQty","entryId":"<id>","qty":<number>}   // entryId must be one of today's items listed above
 {"op":"delete","entryId":"<id>"}
-{"op":"add","meal":"<meal name>","name":"<food>","unit":"<portion>","qty":<number>,"per":{"kcal":n,"protein":n,"carbs":n,"fat":n,"sodium":n,"fiber":n,"sugar":n}}
-Only include tally-actions when you are proposing concrete changes. Nutrition values in "per" are per single unit. Round quantities sensibly.`;
+{"op":"add","name":"<food>","unit":"<portion>","qty":<number>,"date":"<YYYY-MM-DD, optional, defaults to ${dayContext.date}>","per":{"kcal":n,"protein":n,"carbs":n,"fat":n,"sodium":n,"fiber":n,"sugar":n}}
+To log for tomorrow, set "date" to ${dayContext.tomorrow}. setQty/delete only work on today's listed items. Only include tally-actions when proposing concrete changes. "per" values are per single unit; round quantities sensibly.`;
 
   const messages = history.map((m) => {
     if (m.image && m.role === 'user') {
