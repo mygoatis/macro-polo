@@ -1,5 +1,5 @@
 // app.js — Macro Polo main controller.
-const APP_VERSION = 'v22';
+const APP_VERSION = 'v23';
 import * as DB from './db.js';
 import { lineChart } from './charts.js';
 import * as AI from './ai.js';
@@ -305,12 +305,13 @@ async function renderNutrients() {
   const all = await DB.getAllEntries();
   const byDate = {};
   for (const e of all) { (byDate[e.date] ||= []).push(e); }
-  const logged = Object.keys(byDate);
-  let start = logged.length ? logged.sort()[0] : todayStr();
-  const minStart = addDays(todayStr(), -13);
-  if (start > minStart) start = minStart;
-  if (S.date < start) start = S.date;
-  const end = todayStr() > S.date ? todayStr() : S.date;
+  // Render only a window of days centered on the selected date (swipe within it,
+  // arrows jump and re-center). Avoids building thousands of panels for years of data.
+  const WINDOW = 30;
+  const today = todayStr();
+  const start = addDays(S.date, -WINDOW);
+  let end = addDays(S.date, WINDOW);
+  if (end > today) end = today;
 
   const dates = [];
   for (let d = start; d <= end; d = addDays(d, 1)) dates.push(d);
