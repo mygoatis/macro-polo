@@ -56,7 +56,22 @@ function smoothPath(pts) {
  * lineChart — points: [{x:'YYYY-MM-DD', y:Number}] (already filtered to range, sorted)
  * opts: { color, height, yMin, yMax (optional manual), unit, fill }
  */
-export function lineChart(points, opts = {}) {
+// Bucket-average down to ~maxPts so multi-year ranges stay smooth to render.
+function downsample(points, maxPts) {
+  if (points.length <= maxPts) return points;
+  const step = points.length / maxPts;
+  const out = [];
+  for (let i = 0; i < maxPts; i++) {
+    const s = Math.floor(i * step), e = Math.max(s + 1, Math.floor((i + 1) * step));
+    const slice = points.slice(s, e);
+    const avg = slice.reduce((a, p) => a + p.y, 0) / slice.length;
+    out.push({ x: slice[Math.floor(slice.length / 2)].x, y: avg });
+  }
+  return out;
+}
+
+export function lineChart(rawPoints, opts = {}) {
+  const points = downsample(rawPoints, 400);
   const color = opts.color || 'var(--cal)';
   const H = opts.height || 260;
   const padL = 46, padR = 14, padT = 16, padB = 26;

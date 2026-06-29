@@ -2,3 +2,9 @@
 .DS_Store
 Thumbs.db
 *.log
+
+# personal data — never publish
+File-Export-*/
+*import*.json
+macropolo-import.json
+*.csv
