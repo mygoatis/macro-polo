@@ -66,6 +66,10 @@ body {
   line-height: 1.4;
   overscroll-behavior-y: none;
   -webkit-font-smoothing: antialiased;
+  /* Clip the brief horizontal offset of the day-change slide animation so the
+     viewport doesn't jitter. `clip` (not `hidden`) avoids creating a scroll
+     container, so the sticky header and vertical scrolling are unaffected. */
+  overflow-x: clip;
 }
 button, input, select, textarea { font-family: inherit; font-size: inherit; color: inherit; }
 button { cursor: pointer; border: none; background: none; }
