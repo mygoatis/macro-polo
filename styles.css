@@ -328,6 +328,10 @@ input, textarea, select { outline: none; }
 .chart-wrap svg { display: block; width: 100%; height: auto; overflow: visible; }
 .range-seg { display: flex; gap: 6px; flex-wrap: wrap; }
 .range-seg button { padding: 7px 12px; border-radius: 9px; font-size: 13px; font-weight: 600; background: var(--bg-elev-2); color: var(--text-dim); border: 1px solid var(--line-soft); }
+/* Date-range rows: keep all options (incl. Custom) on a single line — buttons
+   share the row and shrink instead of wrapping. */
+.range-seg.dates { flex-wrap: nowrap; gap: 5px; }
+.range-seg.dates button { flex: 1 1 auto; min-width: 0; padding: 7px 6px; font-size: 12px; white-space: nowrap; text-align: center; }
 .range-seg button.active { background: var(--bg-elev-2); color: var(--cal); border-color: color-mix(in srgb, var(--cal) 45%, transparent); }
 .stat-row { display: flex; gap: 10px; }
 .stat-row .stat { flex: 1; background: var(--bg-elev-2); border-radius: 12px; padding: 12px; }
