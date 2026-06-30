@@ -1,5 +1,5 @@
 // app.js — Macro Polo main controller.
-const APP_VERSION = 'v29';
+const APP_VERSION = 'v30';
 import * as DB from './db.js';
 import { lineChart } from './charts.js';
 import * as AI from './ai.js';
@@ -366,7 +366,7 @@ async function renderBody() {
     <div class="field"><label>To</label><input type="date" class="input" id="bt" value="${S.body.to || ''}"></div></div>` : '';
 
   const charts = `<div class="card">
-    <div class="range-seg">${rangeBtns}</div>${customRow}
+    <div class="range-seg dates">${rangeBtns}</div>${customRow}
     <div class="section-title" style="margin-top:14px">Weight (${u.weight})</div>${lineChart(wPts, { color: 'var(--weight)', height: 230 })}
     <div class="section-title" style="margin-top:16px">Waist (${u.length})</div>${lineChart(sPts, { color: 'var(--waist)', height: 230 })}
   </div>`;
@@ -461,7 +461,7 @@ async function renderCharts() {
 
   return `<div class="screen"><div class="card">
     <div class="range-seg" style="margin-bottom:10px">${metricBtns}</div>
-    <div class="range-seg">${rangeBtns}</div>${customRow}${stats}
+    <div class="range-seg dates">${rangeBtns}</div>${customRow}${stats}
     ${lineChart(pts, { color, height: 250 })}
   </div></div>`;
 }
