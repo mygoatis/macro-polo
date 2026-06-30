@@ -417,13 +417,7 @@ body.anim .cal-float { animation: mp-float 1s ease forwards; }
 .macro-chip .v small { font-size: 11px; color: var(--text-faint); font-weight: 600; }
 .macro-chip .l { font-size: 11px; color: var(--text-faint); }
 
-/* ---------- Nutrients tab (side-scroll by date) ---------- */
-.nut-hint { font-size: 12px; padding: 12px 16px 2px; }
-.nut-scroll { position: relative; display: flex; overflow-x: auto; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
-.nut-scroll::-webkit-scrollbar { display: none; }
-.nut-panel { flex: 0 0 100%; scroll-snap-align: start; padding: 8px 16px 16px; }
-.nut-date { font-size: 18px; font-weight: 700; letter-spacing: -0.02em; padding: 6px 2px 12px; }
-.nut-date small { display: block; color: var(--text-faint); font-weight: 500; font-size: 12.5px; margin-top: 2px; }
+/* ---------- Nutrients tab ---------- */
 .nut-rows { display: flex; flex-direction: column; gap: 2px; }
 .nut-row { display: flex; align-items: center; gap: 10px; padding: 11px 4px; border-bottom: 1px solid var(--line-soft); }
 .nut-row:last-child { border-bottom: none; }
