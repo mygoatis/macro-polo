@@ -1,5 +1,5 @@
 // app.js — Macro Polo main controller.
-const APP_VERSION = 'v26';
+const APP_VERSION = 'v27';
 import * as DB from './db.js';
 import { lineChart } from './charts.js';
 import * as AI from './ai.js';
@@ -166,7 +166,6 @@ function initSwipe() {
     const dx = t.clientX - x0, dy = t.clientY - y0;
     if (Math.abs(dx) < THRESH || Math.abs(dx) < Math.abs(dy) * RATIO) return;
     changeDay(dx < 0 ? 1 : -1);   // swipe left → next day, swipe right → previous day
-    haptic(6);
   }, { passive: true });
 }
 
