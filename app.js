@@ -1,5 +1,5 @@
 // app.js — Macro Polo main controller.
-const APP_VERSION = 'v27';
+const APP_VERSION = 'v28';
 import * as DB from './db.js';
 import { lineChart } from './charts.js';
 import * as AI from './ai.js';

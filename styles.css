@@ -486,3 +486,4 @@ body.anim .cal-float { animation: mp-float 1s ease forwards; }
 .photo-inline svg { width: 20px; height: 20px; }
 .photo-inline .more { position: absolute; inset: 0; background: rgba(0,0,0,0.5); color: #fff; display: grid; place-items: center; font-size: 12px; font-weight: 700; }
 .app-header h1.brand-title { color: var(--cal); }
+@media (prefers-color-scheme: dark) { .app-header h1.brand-title { color: var(--text); } }
