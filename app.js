@@ -1,5 +1,5 @@
 // app.js — Macro Polo main controller.
-const APP_VERSION = 'v28';
+const APP_VERSION = 'v29';
 import * as DB from './db.js';
 import { lineChart } from './charts.js';
 import * as AI from './ai.js';
@@ -29,7 +29,7 @@ const NUT = [
 ];
 const META = Object.fromEntries(NUT.map((n) => [n.k, n]));
 const unitOf = (k) => META[k].unit;
-const RANGE_LABEL = { '7': '1W', '30': '1M', '90': '3M', '365': '1Y', all: 'All' };
+const RANGE_LABEL = { '7': '1W', '30': '1M', '90': '3M', '180': '6M', '365': '1Y', all: 'All' };
 
 let installPrompt = null;
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installPrompt = e; });
@@ -358,7 +358,7 @@ async function renderBody() {
     <input type="file" id="qphotofile" accept="image/*" capture="environment" style="display:none">
   </div>`;
 
-  const ranges = ['7', '30', '90', '365', 'all'];
+  const ranges = ['7', '30', '90', '180', '365', 'all'];
   const rangeBtns = ranges.map((r) => `<button class="${S.body.mode === r ? 'active' : ''}" data-act="body-range" data-r="${r}">${RANGE_LABEL[r]}</button>`).join('')
     + `<button class="${S.body.mode === 'custom' ? 'active' : ''}" data-act="body-range" data-r="custom">Custom</button>`;
   const customRow = S.body.mode === 'custom' ? `<div class="field-row" style="margin-top:10px">
@@ -441,7 +441,7 @@ async function renderCharts() {
   const color = META[metric].color;
 
   const metricBtns = NUT.map((n) => `<button class="${metric === n.k ? 'active' : ''}" data-act="chart-metric" data-m="${n.k}">${n.label}</button>`).join('');
-  const ranges = ['7', '30', '90', '365', 'all'];
+  const ranges = ['7', '30', '90', '180', '365', 'all'];
   const rangeBtns = ranges.map((r) => `<button class="${S.chart.mode === r ? 'active' : ''}" data-act="chart-range" data-r="${r}">${RANGE_LABEL[r]}</button>`).join('')
     + `<button class="${S.chart.mode === 'custom' ? 'active' : ''}" data-act="chart-range" data-r="custom">Custom</button>`;
   const customRow = S.chart.mode === 'custom' ? `<div class="field-row" style="margin-top:10px">
