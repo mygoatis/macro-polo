@@ -321,7 +321,7 @@ input, textarea, select { outline: none; }
 
 /* ---------- Charts ---------- */
 .chart-wrap { width: 100%; }
-.chart-wrap svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart-wrap svg { display: block; width: 100%; height: auto; overflow: visible; touch-action: pan-y; cursor: crosshair; }
 .range-seg { display: flex; gap: 6px; flex-wrap: wrap; }
 .range-seg button { padding: 7px 12px; border-radius: 9px; font-size: 13px; font-weight: 600; background: var(--bg-elev-2); color: var(--text-dim); border: 1px solid var(--line-soft); }
 .range-seg button.active { background: var(--bg-elev-2); color: var(--cal); border-color: color-mix(in srgb, var(--cal) 45%, transparent); }

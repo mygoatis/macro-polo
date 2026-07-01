@@ -70,18 +70,25 @@ function downsample(points, maxPts) {
   return out;
 }
 
+// Registry of per-chart hit-test data for the drag-to-inspect scrubber.
+const _scrub = new Map();
+let _cid = 0;
+export function resetScrubData() { _scrub.clear(); _cid = 0; }
+
 export function lineChart(rawPoints, opts = {}) {
-  const points = downsample(rawPoints, 400);
   const color = opts.color || 'var(--cal)';
+  const unit = opts.unit || '';
+  const round = !!opts.round;
   const H = opts.height || 260;
   const padL = 46, padR = 14, padT = 16, padB = 26;
   const id = 'g' + Math.random().toString(36).slice(2, 8);
 
-  if (!points.length) {
+  if (!rawPoints.length) {
     return `<div class="chart-wrap"><svg viewBox="0 0 ${W} ${H}"><text x="${W/2}" y="${H/2}" fill="var(--text-faint)" font-size="15" text-anchor="middle">No data in range</text></svg></div>`;
   }
 
-  const ys = points.map((p) => p.y);
+  // Scales come from the FULL data so hit-testing and the highlighted dot are exact.
+  const ys = rawPoints.map((p) => p.y);
   let { lo, hi, step } = niceBounds(
     opts.yMin != null ? opts.yMin : Math.min(...ys),
     opts.yMax != null ? opts.yMax : Math.max(...ys)
@@ -89,13 +96,15 @@ export function lineChart(rawPoints, opts = {}) {
   if (opts.yMin != null) lo = opts.yMin;
   if (opts.yMax != null) hi = opts.yMax;
 
-  const xs = points.map((p) => dayNum(p.x));
+  const xs = rawPoints.map((p) => dayNum(p.x));
   const xMin = Math.min(...xs), xMax = Math.max(...xs);
   const xRange = xMax - xMin || 1;
 
   const sx = (x) => padL + ((x - xMin) / xRange) * (W - padL - padR);
   const sy = (y) => padT + (1 - (y - lo) / (hi - lo)) * (H - padT - padB);
 
+  // The drawn line is downsampled only for rendering speed on multi-year ranges.
+  const points = downsample(rawPoints, 400);
   const scaled = points.map((p) => ({ x: sx(dayNum(p.x)), y: sy(p.y), raw: p }));
   const path = smoothPath(scaled);
   const areaPath = path + ` L${scaled[scaled.length-1].x},${sy(lo)} L${scaled[0].x},${sy(lo)} Z`;
@@ -146,7 +155,14 @@ export function lineChart(rawPoints, opts = {}) {
     ? scaled.map((p) => `<circle cx="${p.x}" cy="${p.y}" r="${scaled.length>30?2:3}" fill="${color}"/>`).join('')
     : '';
 
-  return `<div class="chart-wrap"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+  // Exact per-day hit points for the scrubber (from full data, not the drawn line).
+  const cid = 'sc' + (++_cid);
+  _scrub.set(cid, {
+    hit: rawPoints.map((p) => ({ x: sx(dayNum(p.x)), y: sy(p.y), date: p.x, val: p.y })),
+    color, unit, round, W, padT, padB,
+  });
+
+  return `<div class="chart-wrap" data-cid="${cid}"><svg viewBox="0 0 ${W} ${H}">
     <defs>
       <linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0" stop-color="${color}" stop-opacity="0.28"/>
@@ -161,7 +177,71 @@ export function lineChart(rawPoints, opts = {}) {
     <circle cx="${last.x}" cy="${last.y}" r="5" fill="${color}"/>
     <circle cx="${last.x}" cy="${last.y}" r="9" fill="${color}" opacity="0.2" class="dot-pulse"/>
     ${xlabels}
+    <g class="scrub" style="visibility:hidden;pointer-events:none">
+      <line class="scrub-line" x1="0" y1="${padT}" x2="0" y2="${H - padB}" stroke="${color}" stroke-width="1.5" opacity="0.55"/>
+      <circle class="scrub-halo" r="9" fill="var(--bg-elev)"/>
+      <circle class="scrub-dot" r="5" fill="${color}"/>
+      <rect class="scrub-pill-bg" x="0" y="1" width="10" height="23" rx="11" fill="var(--bg-elev-2)" stroke="var(--line)"/>
+      <text class="scrub-pill-tx" x="0" y="17" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700"></text>
+    </g>
   </svg></div>`;
+}
+
+// Wire drag/hover scrubbing on every line chart found under `root`.
+export function attachScrub(root) {
+  root.querySelectorAll('.chart-wrap[data-cid]').forEach((wrap) => {
+    const meta = _scrub.get(wrap.dataset.cid);
+    if (!meta || !meta.hit.length) return;
+    const svg = wrap.querySelector('svg');
+    const g = wrap.querySelector('.scrub');
+    const vline = wrap.querySelector('.scrub-line');
+    const halo = wrap.querySelector('.scrub-halo');
+    const dot = wrap.querySelector('.scrub-dot');
+    const pbg = wrap.querySelector('.scrub-pill-bg');
+    const ptx = wrap.querySelector('.scrub-pill-tx');
+    const HP = meta.hit;
+    const fmtV = (v) => (meta.round ? Math.round(v) : Math.round(v * 10) / 10).toLocaleString();
+    const nearest = (X) => {
+      if (X <= HP[0].x) return HP[0];
+      if (X >= HP[HP.length - 1].x) return HP[HP.length - 1];
+      let a = 0, b = HP.length - 1;
+      while (a < b) { const m = (a + b) >> 1; if (HP[m].x < X) a = m + 1; else b = m; }
+      const p0 = HP[a - 1], p1 = HP[a];
+      return (X - p0.x) <= (p1.x - X) ? p0 : p1;
+    };
+    const show = (clientX) => {
+      const r = svg.getBoundingClientRect();
+      const X = (clientX - r.left) * meta.W / r.width;
+      const p = nearest(X);
+      vline.setAttribute('x1', p.x); vline.setAttribute('x2', p.x);
+      halo.setAttribute('cx', p.x); halo.setAttribute('cy', p.y);
+      dot.setAttribute('cx', p.x); dot.setAttribute('cy', p.y);
+      const d = new Date(p.date + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+      ptx.textContent = `${d} · ${fmtV(p.val)}${meta.unit ? ' ' + meta.unit : ''}`;
+      const pw = ptx.getComputedTextLength() + 22, half = pw / 2;
+      const cx = Math.min(Math.max(p.x, half + 2), meta.W - half - 2);
+      pbg.setAttribute('x', cx - half); pbg.setAttribute('width', pw);
+      ptx.setAttribute('x', cx);
+      g.style.visibility = 'visible';
+    };
+    const hide = () => { g.style.visibility = 'hidden'; };
+    let active = false, engaged = false, x0 = 0, y0 = 0;
+    svg.addEventListener('pointerdown', (e) => { if (e.pointerType !== 'mouse') { active = true; engaged = false; x0 = e.clientX; y0 = e.clientY; } });
+    svg.addEventListener('pointermove', (e) => {
+      if (e.pointerType === 'mouse') { show(e.clientX); return; }
+      if (!active) return;
+      if (!engaged) {
+        const dx = e.clientX - x0, dy = e.clientY - y0;
+        if (Math.abs(dx) > 5 && Math.abs(dx) > Math.abs(dy)) { engaged = true; try { svg.setPointerCapture(e.pointerId); } catch {} }
+        else return;
+      }
+      show(e.clientX);
+    });
+    const end = () => { active = false; engaged = false; hide(); };
+    svg.addEventListener('pointerup', end);
+    svg.addEventListener('pointercancel', end);
+    svg.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse') hide(); });
+  });
 }
 
 /**

@@ -1,7 +1,7 @@
 // app.js — Macro Polo main controller.
-const APP_VERSION = 'v25';
+const APP_VERSION = 'v26';
 import * as DB from './db.js';
-import { lineChart } from './charts.js';
+import { lineChart, attachScrub, resetScrubData } from './charts.js';
 import * as AI from './ai.js';
 import { lookupBarcode, searchFoods } from './food-data.js';
 
@@ -169,6 +169,7 @@ function floatGain(g) {
 // ---------------- Render ----------------
 async function render() {
   if (!S.settings) S.settings = await DB.getSettings();
+  resetScrubData();
   let bodyHTML = '';
   if (S.tab === 'food') bodyHTML = await renderFood();
   else if (S.tab === 'nutrients') bodyHTML = await renderNutrients();
@@ -186,6 +187,7 @@ async function render() {
     if (pendingGain > 0) floatGain(pendingGain);
   }
   pendingGain = 0; foodAnim = null;
+  if (S.tab === 'body' || S.tab === 'charts') attachScrub($app);
   if (S.tab === 'nutrients') {
     const sc = document.getElementById('nutscroll');
     const target = sc?.querySelector(`[data-date="${S.date}"]`) || sc?.lastElementChild;
@@ -369,8 +371,8 @@ async function renderBody() {
 
   const charts = `<div class="card">
     <div class="range-seg">${rangeBtns}</div>${customRow}
-    <div class="section-title" style="margin-top:14px">Weight (${u.weight})</div>${lineChart(wPts, { color: 'var(--weight)', height: 230 })}
-    <div class="section-title" style="margin-top:16px">Waist (${u.length})</div>${lineChart(sPts, { color: 'var(--waist)', height: 230 })}
+    <div class="section-title" style="margin-top:14px">Weight (${u.weight})</div>${lineChart(wPts, { color: 'var(--weight)', height: 230, unit: u.weight })}
+    <div class="section-title" style="margin-top:16px">Waist (${u.length})</div>${lineChart(sPts, { color: 'var(--waist)', height: 230, unit: u.length })}
   </div>`;
 
   let recent = '';
@@ -464,7 +466,7 @@ async function renderCharts() {
   return `<div class="screen"><div class="card">
     <div class="range-seg" style="margin-bottom:10px">${metricBtns}</div>
     <div class="range-seg">${rangeBtns}</div>${customRow}${stats}
-    ${lineChart(pts, { color, height: 250 })}
+    ${lineChart(pts, { color, height: 250, unit: unitOf(metric), round: metric === 'kcal' })}
   </div></div>`;
 }
 
