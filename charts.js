@@ -75,6 +75,26 @@ const _scrub = new Map();
 let _cid = 0;
 export function resetScrubData() { _scrub.clear(); _cid = 0; }
 
+// Exponential least-squares fit (y = a·e^(b·x)) via log-linear regression, like
+// a spreadsheet's EXPONENTIAL trendline. Only positive y can be fit (we take ln y),
+// so non-positive points are dropped. Returns a function x(dayNum) -> y, or null.
+function expTrend(points) {
+  const pos = points.filter((p) => p.y > 0);
+  if (pos.length < 2) return null;
+  const xs = pos.map((p) => dayNum(p.x));
+  const x0 = xs[0]; // shift x to keep the regression numerically stable
+  let n = 0, sx = 0, sy = 0, sxx = 0, sxy = 0;
+  for (let i = 0; i < pos.length; i++) {
+    const X = xs[i] - x0, Y = Math.log(pos[i].y);
+    n++; sx += X; sy += Y; sxx += X * X; sxy += X * Y;
+  }
+  const denom = n * sxx - sx * sx;
+  if (denom === 0) return null; // all points on the same day
+  const b = (n * sxy - sx * sy) / denom;
+  const a = (sy - b * sx) / n;
+  return (xDay) => Math.exp(a + b * (xDay - x0));
+}
+
 export function lineChart(rawPoints, opts = {}) {
   const color = opts.color || 'var(--cal)';
   const unit = opts.unit || '';
@@ -150,6 +170,20 @@ export function lineChart(rawPoints, opts = {}) {
     }
   }
 
+  // Exponential trendline (gray, dashed), sampled across the x-domain and drawn
+  // over the data line. Clamped to the plot area so an extreme fit can't overflow.
+  let trendPath = '';
+  const trendFn = expTrend(points);
+  if (trendFn) {
+    const N = 56, clampY = (y) => Math.max(padT, Math.min(H - padB, y));
+    const tp = [];
+    for (let i = 0; i <= N; i++) {
+      const xv = xMin + (xRange) * (i / N);
+      tp.push(`${sx(xv).toFixed(1)},${clampY(sy(trendFn(xv))).toFixed(1)}`);
+    }
+    trendPath = `<path d="M${tp.join(' L')}" fill="none" stroke="var(--text-dim)" stroke-width="1.8" stroke-dasharray="6 5" stroke-linecap="round" opacity="0.8"/>`;
+  }
+
   const last = scaled[scaled.length - 1];
   const dots = scaled.length <= 60
     ? scaled.map((p) => `<circle cx="${p.x}" cy="${p.y}" r="${scaled.length>30?2:3}" fill="${color}"/>`).join('')
@@ -173,6 +207,7 @@ export function lineChart(rawPoints, opts = {}) {
     ${vgrid}
     <path d="${areaPath}" fill="url(#${id})" class="area-fade"/>
     <path d="${path}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="line-draw" pathLength="1"/>
+    ${trendPath}
     ${dots}
     <circle cx="${last.x}" cy="${last.y}" r="5" fill="${color}"/>
     <circle cx="${last.x}" cy="${last.y}" r="9" fill="${color}" opacity="0.2" class="dot-pulse"/>

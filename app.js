@@ -1,5 +1,5 @@
 // app.js — Macro Polo main controller.
-const APP_VERSION = 'v26';
+const APP_VERSION = 'v31';
 import * as DB from './db.js';
 import { lineChart, attachScrub, resetScrubData } from './charts.js';
 import * as AI from './ai.js';
@@ -29,7 +29,7 @@ const NUT = [
 ];
 const META = Object.fromEntries(NUT.map((n) => [n.k, n]));
 const unitOf = (k) => META[k].unit;
-const RANGE_LABEL = { '7': '1W', '30': '1M', '90': '3M', '365': '1Y', all: 'All' };
+const RANGE_LABEL = { '7': '1W', '30': '1M', '90': '3M', '180': '6M', '365': '1Y', all: 'All' };
 
 let installPrompt = null;
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installPrompt = e; });
@@ -135,6 +135,38 @@ function initBackButton() {
     if (tabHistory.length) { S.tab = tabHistory.pop(); S.selection.clear(); render(); try { history.pushState({ mp: 1 }, ''); } catch {} return; }
     // nothing left to close — let the next back actually leave the app
   });
+}
+
+// ---------------- Day navigation ----------------
+// Move the selected day by exactly `delta` days (±1) and re-render with a slide.
+function changeDay(delta) {
+  if (!delta) return;
+  dateDir = delta > 0 ? 1 : -1;
+  S.date = addDays(S.date, delta > 0 ? 1 : -1);
+  S.selection.clear();
+  render();
+}
+
+// One horizontal swipe = one day, on the Food and Nutrients tabs.
+function initSwipe() {
+  let x0 = 0, y0 = 0, tracking = false;
+  const THRESH = 55;   // min horizontal travel (px) to count as a swipe
+  const RATIO = 1.4;   // must be this much more horizontal than vertical
+  document.addEventListener('touchstart', (e) => {
+    tracking = false;
+    if (S.tab !== 'food' && S.tab !== 'nutrients') return;
+    if (sheetStack.length) return;                       // a sheet is open
+    if (e.touches.length !== 1) return;                  // pinch / multi-touch
+    if (e.target.closest('input, textarea, select, button, .selbar')) return;
+    const t = e.touches[0]; x0 = t.clientX; y0 = t.clientY; tracking = true;
+  }, { passive: true });
+  document.addEventListener('touchend', (e) => {
+    if (!tracking) return; tracking = false;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - x0, dy = t.clientY - y0;
+    if (Math.abs(dx) < THRESH || Math.abs(dx) < Math.abs(dy) * RATIO) return;
+    changeDay(dx < 0 ? 1 : -1);   // swipe left → next day, swipe right → previous day
+  }, { passive: true });
 }
 
 // ---------------- Delight animations ----------------
@@ -302,34 +334,21 @@ function renderSelbar() {
   document.body.appendChild(bar);
 }
 
-// ---------- Nutrients tab (side-scroll by date) ----------
+// ---------- Nutrients tab (one day at a time; swipe or arrows to change day) ----------
 async function renderNutrients() {
-  const all = await DB.getAllEntries();
-  const byDate = {};
-  for (const e of all) { (byDate[e.date] ||= []).push(e); }
-  // Render only a window of days centered on the selected date (swipe within it,
-  // arrows jump and re-center). Avoids building thousands of panels for years of data.
-  const WINDOW = 30;
-  const start = addDays(S.date, -WINDOW);
-  const end = addDays(S.date, WINDOW);
+  const entries = await DB.getEntries(S.date);
+  const totals = sumTotals(entries);
+  const count = entries.length;
+  const slideCls = dateDir > 0 ? ' slide-next' : dateDir < 0 ? ' slide-prev' : ''; dateDir = 0;
 
-  const dates = [];
-  for (let d = start; d <= end; d = addDays(d, 1)) dates.push(d);
-
-  const panel = (d) => {
-    const totals = sumTotals(byDate[d] || []);
-    const count = (byDate[d] || []).length;
-    return `<section class="nut-panel" data-date="${d}">
-      <div class="section-title">Calories</div>
-      <div class="card cal-hero"><span class="v">${K(totals.kcal)}</span><span class="u">cal · ${count} item${count === 1 ? '' : 's'}</span></div>
-      <div class="section-title">Macros</div>
-      <div class="card nut-rows">${nutrientRows(totals, ['carbs', 'protein', 'fat'])}</div>
-      <div class="section-title">Micronutrients</div>
-      <div class="card nut-rows">${nutrientRows(totals, ['sodium', 'fiber', 'sugar'])}</div>
-    </section>`;
-  };
-
-  return `<div class="nut-scroll" id="nutscroll">${dates.map(panel).join('')}</div>`;
+  return `<div class="screen${slideCls}">
+    <div class="section-title">Calories</div>
+    <div class="card cal-hero"><span class="v">${K(totals.kcal)}</span><span class="u">cal · ${count} item${count === 1 ? '' : 's'}</span></div>
+    <div class="section-title">Macros</div>
+    <div class="card nut-rows">${nutrientRows(totals, ['carbs', 'protein', 'fat'])}</div>
+    <div class="section-title">Micronutrients</div>
+    <div class="card nut-rows">${nutrientRows(totals, ['sodium', 'fiber', 'sugar'])}</div>
+  </div>`;
 }
 
 // ---------- Body tab ----------
@@ -362,7 +381,7 @@ async function renderBody() {
     <input type="file" id="qphotofile" accept="image/*" capture="environment" style="display:none">
   </div>`;
 
-  const ranges = ['7', '30', '90', '365', 'all'];
+  const ranges = ['7', '30', '90', '180', '365', 'all'];
   const rangeBtns = ranges.map((r) => `<button class="${S.body.mode === r ? 'active' : ''}" data-act="body-range" data-r="${r}">${RANGE_LABEL[r]}</button>`).join('')
     + `<button class="${S.body.mode === 'custom' ? 'active' : ''}" data-act="body-range" data-r="custom">Custom</button>`;
   const customRow = S.body.mode === 'custom' ? `<div class="field-row" style="margin-top:10px">
@@ -370,7 +389,7 @@ async function renderBody() {
     <div class="field"><label>To</label><input type="date" class="input" id="bt" value="${S.body.to || ''}"></div></div>` : '';
 
   const charts = `<div class="card">
-    <div class="range-seg">${rangeBtns}</div>${customRow}
+    <div class="range-seg dates">${rangeBtns}</div>${customRow}
     <div class="section-title" style="margin-top:14px">Weight (${u.weight})</div>${lineChart(wPts, { color: 'var(--weight)', height: 230, unit: u.weight })}
     <div class="section-title" style="margin-top:16px">Waist (${u.length})</div>${lineChart(sPts, { color: 'var(--waist)', height: 230, unit: u.length })}
   </div>`;
@@ -445,7 +464,7 @@ async function renderCharts() {
   const color = META[metric].color;
 
   const metricBtns = NUT.map((n) => `<button class="${metric === n.k ? 'active' : ''}" data-act="chart-metric" data-m="${n.k}">${n.label}</button>`).join('');
-  const ranges = ['7', '30', '90', '365', 'all'];
+  const ranges = ['7', '30', '90', '180', '365', 'all'];
   const rangeBtns = ranges.map((r) => `<button class="${S.chart.mode === r ? 'active' : ''}" data-act="chart-range" data-r="${r}">${RANGE_LABEL[r]}</button>`).join('')
     + `<button class="${S.chart.mode === 'custom' ? 'active' : ''}" data-act="chart-range" data-r="custom">Custom</button>`;
   const customRow = S.chart.mode === 'custom' ? `<div class="field-row" style="margin-top:10px">
@@ -465,7 +484,7 @@ async function renderCharts() {
 
   return `<div class="screen"><div class="card">
     <div class="range-seg" style="margin-bottom:10px">${metricBtns}</div>
-    <div class="range-seg">${rangeBtns}</div>${customRow}${stats}
+    <div class="range-seg dates">${rangeBtns}</div>${customRow}${stats}
     ${lineChart(pts, { color, height: 250, unit: unitOf(metric), round: metric === 'kcal' })}
   </div></div>`;
 }
@@ -1124,8 +1143,8 @@ document.addEventListener('click', async (e) => {
     case 'tab': if (t.dataset.tab !== S.tab) tabHistory.push(S.tab); S.tab = t.dataset.tab; S.selection.clear(); render(); break;
     case 'settings': openSettings(); break;
     case 'chat': openChat(); break;
-    case 'date-prev': dateDir = -1; S.date = addDays(S.date, -1); S.selection.clear(); render(); break;
-    case 'date-next': dateDir = 1; S.date = addDays(S.date, 1); S.selection.clear(); render(); break;
+    case 'date-prev': changeDay(-1); break;
+    case 'date-next': changeDay(1); break;
     case 'date-pick': { const dp = document.getElementById('datepick'); dp.showPicker ? dp.showPicker() : dp.click(); break; }
     case 'add-food': openAddFood(); break;
     case 'copy-day': openCopyDay(); break;
@@ -1191,6 +1210,7 @@ function saveUI() {
 // ---------------- Boot ----------------
 loadUI();
 initBackButton();
+initSwipe();
 (async () => {
   S.settings = await DB.getSettings();
   setAnim(S.settings.animations !== false);
