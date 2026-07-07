@@ -88,8 +88,10 @@ function r1(n) { return Math.round((Number(n) || 0) * 10) / 10; }
 export async function chatComplete(history, dayContext, settings) {
   const system = `You are a friendly, knowledgeable registered dietician inside the Macro Polo app. You help the user adjust their day to hit calorie/macro targets and answer nutrition questions. Be concise and practical. Calories are shown to the user as "cal".
 
-Today (${dayContext.date}):
-Current totals: ${JSON.stringify(dayContext.totals)}
+The real current date is ${dayContext.todayLabel}. In YYYY-MM-DD: today = ${dayContext.today}, yesterday = ${dayContext.yesterday}, tomorrow = ${dayContext.tomorrow}. ALWAYS resolve "today", "yesterday", "tomorrow", "this morning", and weekday names against this real current date, never against the day being viewed.
+
+The user is currently viewing their log for ${dayContext.viewingLabel} (${dayContext.viewing}). The totals and items below are for that viewed day:
+Totals: ${JSON.stringify(dayContext.totals)}
 Logged items (id, name, qty x unit, per-unit nutrition):
 ${dayContext.entries.map((e) => `- ${e.id}: ${e.name}, ${e.qty} x ${e.unit} @ ${JSON.stringify(e.per)}`).join('\n') || '(none)'}
 
@@ -99,11 +101,11 @@ Never use em dashes or hyphens as punctuation in your replies. Use periods or co
 
 If the user shares a SCREENSHOT (e.g. a MyFitnessPal diary, a nutrition label, or a meal photo), read it carefully and extract each distinct food with its nutrition for the portion shown, then propose adding them via "add" actions. Briefly list what you found first.
 
-When changing the day or adding foods, do the math precisely, give a short explanation, then output a fenced code block labelled tally-actions containing a JSON array of actions. Today is ${dayContext.date}; tomorrow is ${dayContext.tomorrow}. Action shapes:
-{"op":"setQty","entryId":"<id>","qty":<number>}   // entryId must be one of today's items listed above
+When changing the day or adding foods, do the math precisely, give a short explanation, then output a fenced code block labelled tally-actions containing a JSON array of actions. Action shapes:
+{"op":"setQty","entryId":"<id>","qty":<number>}   // entryId must be one of the viewed day's items listed above
 {"op":"delete","entryId":"<id>"}
-{"op":"add","name":"<food>","unit":"<portion>","qty":<number>,"date":"<YYYY-MM-DD, optional, defaults to ${dayContext.date}>","per":{"kcal":n,"protein":n,"carbs":n,"fat":n,"sodium":n,"fiber":n,"sugar":n}}
-To log for tomorrow, set "date" to ${dayContext.tomorrow}. setQty/delete only work on today's listed items. Only include tally-actions when proposing concrete changes. "per" values are per single unit; round quantities sensibly.`;
+{"op":"add","name":"<food>","unit":"<portion>","qty":<number>,"date":"<YYYY-MM-DD>","per":{"kcal":n,"protein":n,"carbs":n,"fat":n,"sodium":n,"fiber":n,"sugar":n}}
+ALWAYS set "date" on add actions, resolved from the real current date: "today" = ${dayContext.today}, "yesterday" = ${dayContext.yesterday}, "tomorrow" = ${dayContext.tomorrow}. If the user names no day, default to the day they are viewing (${dayContext.viewing}). setQty/delete only affect the viewed day's listed items. Only include tally-actions when proposing concrete changes. "per" values are per single unit; round quantities sensibly.`;
 
   const messages = history.map((m) => {
     if (m.image && m.role === 'user') {

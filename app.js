@@ -1,5 +1,5 @@
 // app.js — Macro Polo main controller.
-const APP_VERSION = 'v31';
+const APP_VERSION = 'v32';
 import * as DB from './db.js';
 import { lineChart, attachScrub, resetScrubData } from './charts.js';
 import * as AI from './ai.js';
@@ -1003,7 +1003,15 @@ async function openChat() {
     log.innerHTML += `<div class="msg ai thinking"><span class="spinner"></span></div>`; log.scrollTop = log.scrollHeight;
     try {
       const entries = await DB.getEntries(S.date);
-      const ctx = { date: S.date, tomorrow: addDays(S.date, 1), totals: roundTotals(sumTotals(entries)), entries: entries.map((e) => ({ id: e.id, name: e.name, qty: e.qty, unit: e.unit, per: e.per })) };
+      const today = todayStr();
+      const ctx = {
+        today, yesterday: addDays(today, -1), tomorrow: addDays(today, 1),
+        todayLabel: new Date(today + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
+        viewing: S.date,
+        viewingLabel: new Date(S.date + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }),
+        totals: roundTotals(sumTotals(entries)),
+        entries: entries.map((e) => ({ id: e.id, name: e.name, qty: e.qty, unit: e.unit, per: e.per })),
+      };
       const { text: reply, actions } = await AI.chatComplete(S.chat, ctx, S.settings);
       S.chat.push({ role: 'assistant', text: reply }); S.pendingActions = actions && actions.length ? actions : null;
     } catch (err) { S.chat.push({ role: 'assistant', text: '⚠️ ' + err.message }); }
@@ -1199,12 +1207,17 @@ function setChartRange(r) { S.chart.mode = r; if (r === 'custom' && !S.chart.fro
 function loadUI() {
   try {
     const u = JSON.parse(localStorage.getItem('mp.ui') || '{}');
-    if (u.date) S.date = u.date;
-    if (u.tab && ['food', 'nutrients', 'body', 'charts'].includes(u.tab)) S.tab = u.tab;
+    // Only restore the last place on a quick reload or resume-from-background
+    // (active within 30 min). A genuine cold restart opens to today + Food.
+    const recent = u.ts && (Date.now() - u.ts) < 30 * 60 * 1000;
+    if (recent) {
+      if (u.date) S.date = u.date;
+      if (u.tab && ['food', 'nutrients', 'body', 'charts'].includes(u.tab)) S.tab = u.tab;
+    }
   } catch {}
 }
 function saveUI() {
-  try { localStorage.setItem('mp.ui', JSON.stringify({ date: S.date, tab: S.tab })); } catch {}
+  try { localStorage.setItem('mp.ui', JSON.stringify({ date: S.date, tab: S.tab, ts: Date.now() })); } catch {}
 }
 
 // ---------------- Boot ----------------
