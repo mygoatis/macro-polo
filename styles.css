@@ -343,7 +343,8 @@ input, textarea, select { outline: none; }
 
 /* ---------- Chat ---------- */
 .chat-log { display: flex; flex-direction: column; gap: 10px; }
-.msg { max-width: 85%; padding: 11px 14px; border-radius: 16px; font-size: 14.5px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+.msg { max-width: 85%; padding: 11px 14px; border-radius: 16px; font-size: 14.5px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; user-select: text; -webkit-user-select: text; -webkit-touch-callout: default; }
+.msg-img { -webkit-user-select: auto; -webkit-touch-callout: default; }
 .msg.user { align-self: flex-end; background: var(--cal); color: var(--on-accent); border-bottom-right-radius: 5px; }
 .msg.ai { align-self: flex-start; background: var(--bg-elev-2); border: 1px solid var(--line-soft); border-bottom-left-radius: 5px; }
 .msg.ai.thinking { color: var(--text-faint); }

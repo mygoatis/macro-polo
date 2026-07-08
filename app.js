@@ -1,5 +1,5 @@
 // app.js — Macro Polo main controller.
-const APP_VERSION = 'v32';
+const APP_VERSION = 'v33';
 import * as DB from './db.js';
 import { lineChart, attachScrub, resetScrubData } from './charts.js';
 import * as AI from './ai.js';
@@ -968,8 +968,10 @@ async function openChat() {
         <button class="btn primary" id="chatsend" style="flex:none">${svg('chevR')}</button>
       </div>
       <input type="file" id="chatfile" accept="image/*" style="display:none">
-    </div>`);
+    </div>`,
+    `<button class="icon-btn" id="chatclear" title="Clear conversation">${svg('trash')}</button>`);
   const log = back.querySelector('#chatlog'); const input = back.querySelector('#chatin');
+  const scrollBottom = () => { log.scrollTop = log.scrollHeight; };
   let pendingImage = null;
   function drawPreview() {
     const p = back.querySelector('#chatpreview');
@@ -985,10 +987,21 @@ async function openChat() {
     log.innerHTML = S.chat.map((m) => `<div class="msg ${m.role === 'user' ? 'user' : 'ai'}">${m.image ? `<img class="msg-img" src="${m.image.dataUrl}" alt="">` : ''}${esc(m.text)}</div>`).join('')
       || `<div class="empty">I'm your dietician. Ask me to adjust your day to a target, share a screenshot of a food diary to log it, or ask any nutrition question. I use your Claude API key.</div>`;
     if (S.pendingActions?.length) log.innerHTML += `<div class="msg ai" style="border-color:var(--cal)"><b>Proposed changes:</b><br>${describeActions(S.pendingActions)}<br><button class="btn primary sm" id="applyact" style="margin-top:8px">Apply changes</button></div>`;
-    log.scrollTop = log.scrollHeight;
+    scrollBottom();
+    log.querySelectorAll('.msg-img').forEach((im) => { im.onload = scrollBottom; });
     const ap = back.querySelector('#applyact'); if (ap) ap.onclick = applyActions;
   }
+  async function clearChat() {
+    const prev = S.chat;
+    S.chat = []; S.pendingActions = null; await DB.saveChat(S.chat); draw();
+    toast('Conversation cleared', async () => { S.chat = prev; await DB.saveChat(S.chat); draw(); });
+  }
+  back.querySelector('#chatclear').onclick = clearChat;
   draw();
+  // Always land at the newest message when the sheet opens (after layout + images).
+  requestAnimationFrame(scrollBottom);
+  setTimeout(scrollBottom, 120);
+  setTimeout(scrollBottom, 350);
   input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = Math.min(120, input.scrollHeight) + 'px'; });
   input.addEventListener('paste', async (e) => {
     const item = [...(e.clipboardData?.items || [])].find((i) => i.type.startsWith('image/'));
@@ -1012,7 +1025,8 @@ async function openChat() {
         totals: roundTotals(sumTotals(entries)),
         entries: entries.map((e) => ({ id: e.id, name: e.name, qty: e.qty, unit: e.unit, per: e.per })),
       };
-      const { text: reply, actions } = await AI.chatComplete(S.chat, ctx, S.settings);
+      const historyForApi = S.chat.slice(-16); // cap context to keep cost sane
+      const { text: reply, actions } = await AI.chatComplete(historyForApi, ctx, S.settings);
       S.chat.push({ role: 'assistant', text: reply }); S.pendingActions = actions && actions.length ? actions : null;
     } catch (err) { S.chat.push({ role: 'assistant', text: '⚠️ ' + err.message }); }
     DB.saveChat(S.chat); draw();
