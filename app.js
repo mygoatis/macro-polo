@@ -1,5 +1,5 @@
 // app.js — Macro Polo main controller.
-const APP_VERSION = 'v33';
+const APP_VERSION = 'v34';
 import * as DB from './db.js';
 import { lineChart, attachScrub, resetScrubData } from './charts.js';
 import * as AI from './ai.js';
@@ -858,6 +858,8 @@ async function copyEntriesToDates(entries, targets) {
     for (const e of entries) clones.push({ ...e, id: DB.uid(), date, order: ord++ });
   }
   await DB.putEntries(clones);
+  if (targets.length) S.date = targets[0]; // jump to the copied day (first, if several)
+  S.selection.clear();
   toast(`Copied to ${targets.length} day${targets.length > 1 ? 's' : ''}`, async () => { await DB.deleteEntries(clones.map((c) => c.id)); render(); });
   render();
 }

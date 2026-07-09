@@ -317,7 +317,7 @@ input, textarea, select { outline: none; }
   border: 1.5px solid transparent;
 }
 .cal-cell.muted { color: var(--text-faint); background: transparent; }
-.cal-cell.today { border-color: var(--line); }
+.cal-cell.today { border-color: var(--cal); color: var(--cal); }
 .cal-cell.sel { background: var(--cal); color: var(--on-accent); }
 .cal-cell.src { outline: 2px solid var(--cal); outline-offset: -2px; }
 .cal-cell.has::after { content: ""; position: absolute; width: 4px; height: 4px; border-radius: 50%; background: var(--cal); transform: translateY(13px); }
