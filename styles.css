@@ -192,6 +192,13 @@ input, textarea, select { outline: none; }
 .entry-stats .es b { font-weight: 700; font-size: 12px; color: var(--text); }
 .entry-stats .es small { display: block; color: var(--text-faint); font-weight: 600; font-size: 9px; margin-top: 1px; }
 .entry-stats .es.cal { margin-left: 8px; }
+.entry .meta .brand { color: var(--text-dim); font-weight: 650; }
+.list-head { display: flex; align-items: center; gap: 10px; padding: 2px 12px 6px; }
+.list-head .check { width: 22px; height: 22px; border-radius: 7px; border: 2px solid var(--line); display: grid; place-items: center; color: var(--on-accent); flex: none; background: transparent; }
+.list-head .check.sel { background: var(--cal); border-color: var(--cal); }
+.list-head .check svg { width: 14px; height: 14px; }
+.list-head .faint { font-size: 13px; font-weight: 600; }
+.scan-guide { position: absolute; inset: 24% 12%; border: 2px solid rgba(255,255,255,0.75); border-radius: 12px; pointer-events: none; box-shadow: 0 0 0 100vmax rgba(0,0,0,0.12); }
 
 .empty { text-align: center; color: var(--text-faint); padding: 28px 16px; font-size: 14px; }
 

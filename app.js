@@ -1,5 +1,5 @@
 // app.js — Macro Polo main controller.
-const APP_VERSION = 'v34';
+const APP_VERSION = 'v35';
 import * as DB from './db.js';
 import { lineChart, attachScrub, resetScrubData } from './charts.js';
 import * as AI from './ai.js';
@@ -307,7 +307,7 @@ async function renderFood() {
     const sel = S.selection.has(e.id);
     listHTML += `<div class="entry ${sel ? 'sel' : ''}${e.id === enterId ? ' entry-enter' : ''}" data-act="entry" data-id="${e.id}">
       <button class="check" data-act="toggle" data-id="${e.id}">${sel ? svg('check') : ''}</button>
-      <div class="body"><div class="name">${esc(e.name)}</div><div class="meta">${esc(portionText(e))}</div></div>
+      <div class="body"><div class="name">${esc(e.name)}</div><div class="meta">${e.brand ? `<span class="brand">${esc(e.brand)}</span> · ` : ''}${esc(portionText(e))}</div></div>
       <div class="entry-stats">
         <div class="es"><b>${K(t.carbs)}</b><small>C</small></div>
         <div class="es"><b>${K(t.protein)}</b><small>P</small></div>
@@ -318,7 +318,12 @@ async function renderFood() {
   }
   if (!entries.length) listHTML = `<div class="empty">Nothing logged yet.<br>Tap “Add food” to start.</div>`;
 
-  return `<div class="screen${slideCls}">${summary}${actions}<div>${listHTML}</div></div>`;
+  const allSel = entries.length > 0 && entries.every((e) => S.selection.has(e.id));
+  const listHead = entries.length
+    ? `<div class="list-head"><button class="check ${allSel ? 'sel' : ''}" data-act="select-all">${allSel ? svg('check') : ''}</button><span class="faint">Select all</span></div>`
+    : '';
+
+  return `<div class="screen${slideCls}">${summary}${actions}${listHead}<div>${listHTML}</div></div>`;
 }
 
 function renderSelbar() {
@@ -327,7 +332,7 @@ function renderSelbar() {
   if (S.tab !== 'food' || S.selection.size === 0) return;
   const bar = node(`<div class="selbar">
     <span class="count">${S.selection.size} selected</span>
-    <button data-act="sel-copy">${svg('copy')} Copy to…</button>
+    <button data-act="sel-copy">${svg('copy')} Copy / move…</button>
     <button class="danger" data-act="sel-delete">${svg('trash')} Delete</button>
     <button data-act="sel-clear">${svg('x')}</button>
   </div>`);
@@ -493,7 +498,7 @@ async function renderCharts() {
 async function nextOrder(date) { const es = await DB.getEntries(date); return es.length ? Math.max(...es.map((e) => e.order || 0)) + 1 : 0; }
 
 async function addEntry({ name, unit, qty, per, foodId, brand, barcode }) {
-  const entry = { id: DB.uid(), date: S.date, name, unit: unit || '1 serving', qty: qty || 1, per, foodId, order: await nextOrder(S.date) };
+  const entry = { id: DB.uid(), date: S.date, name, brand: brand || '', unit: unit || '1 serving', qty: qty || 1, per, foodId, order: await nextOrder(S.date) };
   await DB.putEntry(entry);
   await ensureLibrary({ name, unit: entry.unit, per, foodId, brand, barcode, qty: entry.qty });
   enterEntryId = entry.id;
@@ -596,7 +601,7 @@ async function subLibrary(host, back) {
     const add = e.target.closest('[data-add]'); if (!add) return;
     const row = add.closest('[data-fid]'); const f = foods.find((x) => x.id === row.dataset.fid);
     const u = parseUnit(f.unit); const amount = Number(row.querySelector('[data-qty]').value) || u.num;
-    await addEntry({ name: f.name, unit: f.unit, qty: amount / u.num, per: f.per, foodId: f.id });
+    await addEntry({ name: f.name, unit: f.unit, qty: amount / u.num, per: f.per, foodId: f.id, brand: f.brand });
     closeSheet(back);
   });
 }
@@ -635,8 +640,8 @@ function subSearch(host) {
 
 async function subBarcode(host, back) {
   const hasDetector = 'BarcodeDetector' in window;
-  host.innerHTML = `${hasDetector ? `<div class="card tight" style="padding:0;overflow:hidden"><video id="cam" playsinline muted style="width:100%;display:block;background:#000;aspect-ratio:4/3;object-fit:cover"></video></div>
-      <div class="faint center" style="font-size:13px;margin:8px 0">Point the camera at a barcode</div>` : `<div class="empty">Live scanning isn't supported here. Enter the barcode number below.</div>`}
+  host.innerHTML = `${hasDetector ? `<div class="card tight" style="padding:0;overflow:hidden;position:relative"><video id="cam" playsinline muted style="width:100%;display:block;background:#000;aspect-ratio:4/3;object-fit:cover"></video><div class="scan-guide"></div></div>
+      <div class="row-between" style="margin:8px 0"><span class="faint" style="font-size:13px">Center the barcode and hold steady</span><span id="btorch"></span></div>` : `<div class="empty">Live scanning isn't supported here. Enter the barcode number below.</div>`}
     <div class="field-row"><input class="input" id="bcode" inputmode="numeric" placeholder="Barcode number"><button class="btn" id="blook">Look up</button></div>
     <div id="bresult" style="margin-top:10px"></div>`;
   const result = host.querySelector('#bresult');
@@ -659,14 +664,37 @@ async function subBarcode(host, back) {
   if (hasDetector) {
     try {
       const detector = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128'] });
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } } });
       const video = host.querySelector('#cam'); video.srcObject = stream; await video.play();
+      const track = stream.getVideoTracks()[0];
+      try { await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }); } catch {}
       let done = false; const stop = () => { done = true; stream.getTracks().forEach((t) => t.stop()); };
       back.addEventListener('click', (e) => { if (e.target === back) stop(); });
       back.querySelector('[data-close]').addEventListener('click', stop);
+
+      // Torch toggle (if the device supports it) for low light
+      try {
+        const caps = track.getCapabilities ? track.getCapabilities() : {};
+        if (caps.torch) {
+          let on = false;
+          const tb = host.querySelector('#btorch');
+          tb.innerHTML = `<button class="btn sm" id="torchbtn">Light off</button>`;
+          tb.querySelector('#torchbtn').onclick = async () => { on = !on; try { await track.applyConstraints({ advanced: [{ torch: on }] }); tb.querySelector('#torchbtn').textContent = on ? 'Light on' : 'Light off'; } catch {} };
+        }
+      } catch {}
+
+      // Require the SAME code on several frames before accepting (kills misreads)
+      let candidate = null, hits = 0;
       const scan = async () => {
         if (done || !document.body.contains(video)) { stop(); return; }
-        try { const codes = await detector.detect(video); if (codes[0]) { stop(); host.querySelector('#bcode').value = codes[0].rawValue; lookup(codes[0].rawValue); return; } } catch {}
+        try {
+          const codes = await detector.detect(video);
+          const val = codes[0] && codes[0].rawValue;
+          if (val) {
+            if (val === candidate) hits++; else { candidate = val; hits = 1; }
+            if (hits >= 4) { stop(); host.querySelector('#bcode').value = val; lookup(val); return; }
+          } else { candidate = null; hits = 0; }
+        } catch {}
         requestAnimationFrame(scan);
       };
       requestAnimationFrame(scan);
@@ -843,13 +871,32 @@ async function openSolver(entryId) {
 async function openCopyDay() {
   const src = await DB.getEntries(S.date);
   if (!src.length) { toast('Nothing to copy on this day'); return; }
-  openCalendarPicker(`Copy ${dayLabel(S.date)} → which days?`, S.date, async (targets) => copyEntriesToDates(src, targets));
+  openCalendarPicker(`${dayLabel(S.date)} → which days?`, S.date, async (targets, mode) => {
+    if (mode === 'move') await moveEntriesToDates(src, targets); else await copyEntriesToDates(src, targets);
+  });
 }
 async function openCopySelected() {
   const entries = await DB.getEntries(S.date);
   const chosen = entries.filter((e) => S.selection.has(e.id));
   if (!chosen.length) return;
-  openCalendarPicker(`Copy ${chosen.length} item${chosen.length > 1 ? 's' : ''} → which days?`, null, async (targets) => { await copyEntriesToDates(chosen, targets); S.selection.clear(); });
+  openCalendarPicker(`${chosen.length} item${chosen.length > 1 ? 's' : ''} → which days?`, null, async (targets, mode) => {
+    if (mode === 'move') await moveEntriesToDates(chosen, targets); else await copyEntriesToDates(chosen, targets);
+  });
+}
+async function moveEntriesToDates(entries, targets) {
+  const clones = [];
+  for (const date of targets) {
+    let ord = await nextOrder(date);
+    for (const e of entries) clones.push({ ...e, id: DB.uid(), date, order: ord++ });
+  }
+  await DB.putEntries(clones);
+  await DB.deleteEntries(entries.map((e) => e.id)); // remove from the source day
+  if (targets.length) S.date = targets[0];
+  S.selection.clear();
+  toast(`Moved to ${targets.length} day${targets.length > 1 ? 's' : ''}`, async () => {
+    await DB.deleteEntries(clones.map((c) => c.id)); await DB.putEntries(entries); render();
+  });
+  render();
 }
 async function copyEntriesToDates(entries, targets) {
   const clones = [];
@@ -868,7 +915,7 @@ function openCalendarPicker(title, sourceDate, onConfirm) {
   const selected = new Set();
   let viewMonth = new Date((sourceDate || todayStr()) + 'T00:00:00'); viewMonth.setDate(1);
   const back = openSheet(title, `<div id="calwrap"></div><div class="faint center" id="calcount" style="font-size:13px;margin-top:8px">Tap days to select</div>`,
-    `<button class="btn ghost" data-close-foot>Cancel</button><button class="btn primary" id="calok" disabled>Copy</button>`);
+    `<button class="btn ghost" id="calmove" disabled>Move</button><button class="btn primary" id="calok" disabled>Copy</button>`);
   function drawCal() {
     const y = viewMonth.getFullYear(), m = viewMonth.getMonth();
     const startDow = new Date(y, m, 1).getDay(); const days = new Date(y, m + 1, 0).getDate();
@@ -889,9 +936,10 @@ function openCalendarPicker(title, sourceDate, onConfirm) {
     selected.has(ds) ? selected.delete(ds) : selected.add(ds); drawCal();
     back.querySelector('#calcount').textContent = selected.size ? `${selected.size} day${selected.size > 1 ? 's' : ''} selected` : 'Tap days to select';
     back.querySelector('#calok').disabled = selected.size === 0;
+    back.querySelector('#calmove').disabled = selected.size === 0;
   });
-  back.querySelector('[data-close-foot]').onclick = () => closeSheet(back);
-  back.querySelector('#calok').onclick = async () => { closeSheet(back); await onConfirm([...selected].sort()); };
+  back.querySelector('#calok').onclick = async () => { closeSheet(back); await onConfirm([...selected].sort(), 'copy'); };
+  back.querySelector('#calmove').onclick = async () => { closeSheet(back); await onConfirm([...selected].sort(), 'move'); };
 }
 
 // ---------- Body edit + photos ----------
@@ -1177,6 +1225,7 @@ document.addEventListener('click', async (e) => {
     case 'sel-copy': openCopySelected(); break;
     case 'sel-delete': await deleteSelected(); break;
     case 'sel-clear': S.selection.clear(); render(); break;
+    case 'select-all': { const es = await DB.getEntries(S.date); const all = es.length && es.every((e) => S.selection.has(e.id)); if (all) S.selection.clear(); else es.forEach((e) => S.selection.add(e.id)); render(); break; }
     case 'body-save': await saveBodyQuick(); break;
     case 'body-pickdate': { const dp = document.getElementById('bodydate'); dp.showPicker ? dp.showPicker() : dp.click(); break; }
     case 'body-range': setBodyRange(t.dataset.r); break;
