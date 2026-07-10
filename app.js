@@ -1,5 +1,5 @@
 // app.js — Macro Polo main controller.
-const APP_VERSION = 'v35';
+const APP_VERSION = 'v36';
 import * as DB from './db.js';
 import { lineChart, attachScrub, resetScrubData } from './charts.js';
 import * as AI from './ai.js';
@@ -30,6 +30,25 @@ const NUT = [
 const META = Object.fromEntries(NUT.map((n) => [n.k, n]));
 const unitOf = (k) => META[k].unit;
 const RANGE_LABEL = { '7': '1W', '30': '1M', '90': '3M', '180': '6M', '365': '1Y', all: 'All' };
+
+// Units of measure. Mass units have a fixed grams-per-unit; volume/count units
+// carry an editable default (grams per one unit) so nutrition scales from per-100g.
+const UNIT_G = { g: 1, oz: 28.3495, lb: 453.592, mg: 0.001, kg: 1000, ml: 1, cup: 240, tbsp: 15, tsp: 5, serving: 100, piece: 50, slice: 30 };
+const MASS_UNITS = new Set(['g', 'oz', 'lb', 'mg', 'kg']);
+const UOM_LIST = ['g', 'oz', 'ml', 'cup', 'tbsp', 'tsp', 'serving', 'piece', 'slice'];
+
+// Resolve an entry/food to a per-100g model + its unit. New foods store per100/gPerUom;
+// legacy entries (per + unit string) are derived best-effort.
+function unitModel(e) {
+  if (e && e.per100 && e.gPerUom) return { per100: e.per100, uom: e.unit || 'g', gPerUom: e.gPerUom, amount: e.qty || 1 };
+  const pu = parseUnit((e && e.unit) || '1 serving');
+  const label = (pu.label || 'serving').toLowerCase();
+  const gPerUom = UNIT_G[label] != null ? UNIT_G[label] : 100;
+  const servingGrams = (pu.num || 1) * gPerUom;
+  const per100 = {}; for (const k of NUTRIENTS) per100[k] = servingGrams ? ((e && e.per && e.per[k]) || 0) * 100 / servingGrams : ((e && e.per && e.per[k]) || 0);
+  const uom = UOM_LIST.includes(label) ? label : (MASS_UNITS.has(label) ? label : 'serving');
+  return { per100, uom, gPerUom, amount: ((e && e.qty) || 1) * (pu.num || 1) };
+}
 
 let installPrompt = null;
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installPrompt = e; });
@@ -497,10 +516,13 @@ async function renderCharts() {
 // ---------------- Entry actions ----------------
 async function nextOrder(date) { const es = await DB.getEntries(date); return es.length ? Math.max(...es.map((e) => e.order || 0)) + 1 : 0; }
 
-async function addEntry({ name, unit, qty, per, foodId, brand, barcode }) {
+async function addEntry({ name, unit, qty, per, foodId, brand, barcode, per100, gPerUom, image }) {
   const entry = { id: DB.uid(), date: S.date, name, brand: brand || '', unit: unit || '1 serving', qty: qty || 1, per, foodId, order: await nextOrder(S.date) };
+  if (per100) entry.per100 = per100;
+  if (gPerUom) entry.gPerUom = gPerUom;
+  if (image) entry.image = image;
   await DB.putEntry(entry);
-  await ensureLibrary({ name, unit: entry.unit, per, foodId, brand, barcode, qty: entry.qty });
+  await ensureLibrary({ name, unit: entry.unit, per, foodId, brand, barcode, qty: entry.qty, per100, gPerUom, image });
   enterEntryId = entry.id;
   pendingGain = K((per?.kcal || 0) * entry.qty);
   haptic(8);
@@ -509,13 +531,20 @@ async function addEntry({ name, unit, qty, per, foodId, brand, barcode }) {
 }
 
 // Every logged food becomes a reusable library item (deduped by name + unit).
-async function ensureLibrary({ name, unit, per, foodId, brand, barcode, qty }) {
+async function ensureLibrary({ name, unit, per, foodId, brand, barcode, qty, per100, gPerUom, image }) {
   if (!name) return;
   const foods = await DB.getFoods();
   let f = foodId ? foods.find((x) => x.id === foodId) : null;
   if (!f) f = foods.find((x) => x.nameLower === (name || '').toLowerCase() && (x.unit || '') === (unit || ''));
-  if (f) { f.useCount = (f.useCount || 0) + 1; f.lastUsed = Date.now(); if (qty != null) f.lastQty = qty; await DB.putFood(f); }
-  else await DB.putFood({ id: DB.uid(), name, unit, per, brand, barcode, useCount: 1, lastUsed: Date.now(), lastQty: qty != null ? qty : 1 });
+  if (f) {
+    f.useCount = (f.useCount || 0) + 1; f.lastUsed = Date.now();
+    if (qty != null) f.lastQty = qty;
+    if (per100) f.per100 = per100; if (gPerUom) f.gPerUom = gPerUom;
+    if (image && !f.image) f.image = image; if (brand && !f.brand) f.brand = brand;
+    await DB.putFood(f);
+  } else {
+    await DB.putFood({ id: DB.uid(), name, unit, per, brand, barcode, per100, gPerUom, image, useCount: 1, lastUsed: Date.now(), lastQty: qty != null ? qty : 1 });
+  }
 }
 
 // One-time: seed the library from previously-logged real foods (skip MFP day summaries).
@@ -584,7 +613,7 @@ async function subLibrary(host, back) {
     if (!filtered.length) { list.innerHTML = `<div class="empty">${foods.length ? 'No match.' : 'Your library is empty.<br>Foods you log are saved here for one-tap re-logging.'}</div>`; return; }
     list.innerHTML = filtered.map((f) => { const u = parseUnit(f.unit); const amt = G((f.lastQty || 1) * u.num);
       return `<div class="list-item food-add" data-fid="${f.id}" style="margin-bottom:8px">
-      <div class="fa-name">${esc(f.name)}${f.brand ? ` · <span class="faint">${esc(f.brand)}</span>` : ''}</div>
+      <div class="fa-name">${f.image ? `<img class="lib-thumb" src="${esc(f.image)}" alt="">` : ''}${esc(f.name)}${f.brand ? ` · <span class="faint">${esc(f.brand)}</span>` : ''}</div>
       <div class="fa-ctrls">
         <span class="fa-meta">${f.per.kcal} cal</span>
         <input class="qty-mini" data-qty inputmode="decimal" value="${amt}"><span class="uom">${esc(u.label)}</span>
@@ -601,7 +630,7 @@ async function subLibrary(host, back) {
     const add = e.target.closest('[data-add]'); if (!add) return;
     const row = add.closest('[data-fid]'); const f = foods.find((x) => x.id === row.dataset.fid);
     const u = parseUnit(f.unit); const amount = Number(row.querySelector('[data-qty]').value) || u.num;
-    await addEntry({ name: f.name, unit: f.unit, qty: amount / u.num, per: f.per, foodId: f.id, brand: f.brand });
+    await addEntry({ name: f.name, unit: f.unit, qty: amount / u.num, per: f.per, foodId: f.id, brand: f.brand, image: f.image, per100: f.per100, gPerUom: f.gPerUom });
     closeSheet(back);
   });
 }
@@ -656,7 +685,7 @@ async function subBarcode(host, back) {
         <button class="btn primary block" id="badd" style="margin-top:10px">Add</button>`;
       result.querySelector('#badd').onclick = async () => {
         const amount = Number(result.querySelector('#bqty').value) || bu.num;
-        await addEntry({ name: f.name, unit: f.unit, qty: amount / bu.num, per: f.per, brand: f.brand, barcode: f.barcode }); closeSheet(back);
+        await addEntry({ name: f.name, unit: f.unit, qty: amount / bu.num, per: f.per, brand: f.brand, barcode: f.barcode, image: f.image }); closeSheet(back);
       };
     } catch { result.innerHTML = `<div class="empty">Lookup failed.</div>`; }
   }
@@ -729,48 +758,59 @@ function subPhoto(host, back) {
 }
 
 function subManual(host, back) {
-  host.innerHTML = entryForm({ name: '', unit: '1 serving', qty: 1, per: emptyPer() })
+  host.innerHTML = entryForm({ name: '', unit: 'g', qty: 100, per: emptyPer() })
     + `<button class="btn primary block" id="madd" style="margin-top:12px">Add food</button>`;
   host.querySelector('#madd').onclick = async () => {
     const data = readEntryForm(host);
     if (!data.name) { toast('Name required'); return; }
-    await addEntry({ name: data.name, unit: data.unit, qty: data.qty, per: data.per }); closeSheet(back);
+    await addEntry({ name: data.name, brand: data.brand, unit: data.unit, qty: data.qty, per: data.per, per100: data.per100, gPerUom: data.gPerUom }); closeSheet(back);
   };
 }
 
 function emptyPer() { const o = {}; for (const k of NUTRIENTS) o[k] = 0; return o; }
 
 function entryForm(e, opts = {}) {
+  const m = unitModel(e);
   const f = (k) => `<div class="field"><label>${META[k].label}${META[k].unit ? ` (${META[k].unit})` : ''}</label>
-    <input class="input" data-f="${k}" inputmode="decimal" value="${e.per[k] ?? 0}"></div>`;
-  const qtyUnit = opts.noQty
-    ? `<div class="field"><label>Unit / portion</label><input class="input" data-f="unit" value="${esc(e.unit)}" placeholder="1 cup"></div>`
-    : `<div class="field-row" style="margin-top:10px">
-        <div class="field"><label>Quantity</label><input class="input" data-f="qty" inputmode="decimal" value="${e.qty}"></div>
-        <div class="field"><label>Unit / portion</label><input class="input" data-f="unit" value="${esc(e.unit)}" placeholder="1 cup"></div></div>`;
+    <input class="input" data-f="${k}" inputmode="decimal" value="${G(m.per100[k] ?? 0)}"></div>`;
+  const uomOpts = UOM_LIST.map((u) => `<option value="${u}" ${u === m.uom ? 'selected' : ''}>${u}</option>`).join('')
+    + (UOM_LIST.includes(m.uom) ? '' : `<option value="${esc(m.uom)}" selected>${esc(m.uom)}</option>`);
+  const amountField = opts.noQty ? '' : `<div class="field"><label>Amount</label><input class="input" data-f="amount" inputmode="decimal" value="${G(m.amount)}"></div>`;
   return `<div class="field"><label>Name</label><input class="input" data-f="name" value="${esc(e.name)}" placeholder="e.g. Greek yogurt"></div>
-    ${qtyUnit}
-    <div class="section-title" style="margin-top:12px">Per unit</div>
+    <div class="field" style="margin-top:10px"><label>Brand (optional)</label><input class="input" data-f="brand" value="${esc(e.brand || '')}"></div>
+    <div class="field-row" style="margin-top:10px">
+      ${amountField}
+      <div class="field"><label>Unit</label><select class="select" data-f="uom">${uomOpts}</select></div>
+      <div class="field"><label>Grams / unit</label><input class="input" data-f="gpu" inputmode="decimal" value="${G(m.gPerUom)}"></div>
+    </div>
+    <div class="section-title" style="margin-top:12px">Nutrition per 100 g</div>
     <div class="grid-2">${f('kcal')}${f('protein')}${f('carbs')}${f('fat')}</div>
     <div class="grid-3" style="margin-top:10px">${f('sodium')}${f('fiber')}${f('sugar')}</div>`;
 }
 function readEntryForm(root, qtyOverride) {
   const get = (k) => root.querySelector(`[data-f="${k}"]`)?.value ?? '';
-  const per = {}; for (const k of NUTRIENTS) per[k] = Number(get(k)) || 0;
-  const qty = qtyOverride != null ? qtyOverride : (Number(get('qty')) || 0);
-  return { name: get('name').trim(), unit: get('unit').trim() || '1 serving', qty, per };
+  const per100 = {}; for (const k of NUTRIENTS) per100[k] = Number(get(k)) || 0;
+  const uom = (get('uom') || 'serving').trim();
+  const gPerUom = MASS_UNITS.has(uom.toLowerCase())
+    ? UNIT_G[uom.toLowerCase()]
+    : (Number(get('gpu')) || UNIT_G[uom.toLowerCase()] || 100);
+  const per = {}; for (const k of NUTRIENTS) per[k] = per100[k] * gPerUom / 100;
+  const amount = qtyOverride != null ? qtyOverride : (Number(get('amount')) || 0);
+  return { name: get('name').trim(), brand: get('brand').trim(), unit: uom, qty: amount, per, per100, gPerUom };
 }
 
 // ---------- Entry detail (view nutrients + adjust volume) ----------
 async function openEntryDetail(id) {
   const entries = await DB.getEntries(S.date);
   const e = entries.find((x) => x.id === id); if (!e) return;
+  const m0 = unitModel(e);
   const headActions = `<button class="icon-btn" id="dsolve" title="Solve quantity">${svg('calc')}</button>
     <button class="icon-btn" id="dedit" title="Edit details">${svg('edit')}</button>`;
   const back = openSheet(e.name || 'Item', `
+    ${e.image ? `<div class="detail-img"><img src="${e.image}" alt=""></div>` : ''}
     <div class="qty-stepper">
       <button class="step" id="qminus">${svg('minus')}</button>
-      <div class="qty-mid"><input class="qty-in" id="dqty" inputmode="decimal" value="${G(e.qty)}"><div class="qty-unit" id="dunitlbl">${esc(e.unit)}</div></div>
+      <div class="qty-mid"><input class="qty-in" id="dqty" inputmode="decimal" value="${G(m0.amount)}"><div class="qty-unit" id="dunitlbl">${esc(m0.uom)}</div></div>
       <button class="step" id="qplus">${svg('plus')}</button>
     </div>
     <div id="dtotals"></div>
@@ -783,9 +823,13 @@ async function openEntryDetail(id) {
 
   const qtyIn = back.querySelector('#dqty');
   const totalsEl = back.querySelector('#dtotals');
-  function curPer() { // read per from edit form (falls back to original)
+  function curPer() { // per 1 unit, computed from the per-100g fields x grams-per-unit
     const get = (k) => back.querySelector(`[data-f="${k}"]`)?.value;
-    const per = {}; for (const k of NUTRIENTS) { const v = get(k); per[k] = v != null && v !== '' ? Number(v) || 0 : (e.per[k] || 0); }
+    const per100 = {}; for (const k of NUTRIENTS) { const v = get(k); per100[k] = v != null && v !== '' ? Number(v) || 0 : (m0.per100[k] || 0); }
+    const uomV = (back.querySelector('[data-f="uom"]')?.value || m0.uom).toLowerCase();
+    const gpuV = back.querySelector('[data-f="gpu"]')?.value;
+    const gPerUom = MASS_UNITS.has(uomV) ? UNIT_G[uomV] : (Number(gpuV) || m0.gPerUom || 100);
+    const per = {}; for (const k of NUTRIENTS) per[k] = per100[k] * gPerUom / 100;
     return per;
   }
   function drawTotals() {
@@ -798,8 +842,8 @@ async function openEntryDetail(id) {
       <div class="card nut-rows">${nutrientRows(tot, ['carbs', 'protein', 'fat'])}</div>
       <div class="section-title">Micros</div>
       <div class="card nut-rows">${nutrientRows(tot, ['sodium', 'fiber', 'sugar'])}</div>`;
-    const unitInput = back.querySelector('[data-f="unit"]');
-    if (unitInput) back.querySelector('#dunitlbl').textContent = unitInput.value || e.unit;
+    const uomSel = back.querySelector('[data-f="uom"]');
+    if (uomSel) back.querySelector('#dunitlbl').textContent = uomSel.value || m0.uom;
   }
   drawTotals();
   qtyIn.addEventListener('input', drawTotals);

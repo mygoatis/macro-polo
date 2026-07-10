@@ -312,6 +312,9 @@ input, textarea, select { outline: none; }
 .food-add .fa-name .faint { font-weight: 400; }
 .food-add .fa-ctrls { display: flex; align-items: center; gap: 8px; }
 .food-add .fa-meta { flex: 1; min-width: 0; color: var(--text-faint); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lib-thumb { width: 18px; height: 18px; border-radius: 4px; object-fit: cover; vertical-align: -3px; margin-right: 6px; }
+.detail-img { width: 100%; border-radius: 12px; overflow: hidden; background: var(--bg-elev-2); display: flex; justify-content: center; }
+.detail-img img { max-width: 100%; max-height: 200px; object-fit: contain; display: block; }
 
 /* ---------- Mini calendar (copy targets) ---------- */
 .cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
