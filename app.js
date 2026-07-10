@@ -1,5 +1,5 @@
 // app.js — Macro Polo main controller.
-const APP_VERSION = 'v37';
+const APP_VERSION = 'v1.38';
 import * as DB from './db.js';
 import { lineChart, attachScrub, resetScrubData } from './charts.js';
 import * as AI from './ai.js';
@@ -684,13 +684,15 @@ async function subBarcode(host, back) {
     try {
       const f = await lookupBarcode(code);
       if (!f) { result.innerHTML = `<div class="empty">Not found (${esc(code)}). Add it manually instead.</div>`; return; }
-      const bu = parseUnit(f.unit);
-      result.innerHTML = `<div class="list-item"><div class="body"><div class="name">${esc(f.name)}</div><div class="meta">${f.per.kcal} cal · ${esc(f.unit)}</div></div>
-        <input class="qty-mini" id="bqty" inputmode="decimal" value="${G(bu.num)}"><span class="uom">${esc(bu.label)}</span></div>
+      const dq = f.qty || 1;
+      const kcalDefault = Math.round((f.per?.kcal || 0) * dq);
+      const sub = [f.brand, f.servingLabel && `serving ${f.servingLabel}`].filter(Boolean).join(' · ');
+      result.innerHTML = `<div class="list-item"><div class="body"><div class="name">${esc(f.name)}</div><div class="meta">${kcalDefault} cal${sub ? ` · ${esc(sub)}` : ''}</div></div>
+        <input class="qty-mini" id="bqty" inputmode="decimal" value="${G(dq)}"><span class="uom">${esc(f.unit)}</span></div>
         <button class="btn primary block" id="badd" style="margin-top:10px">Add</button>`;
       result.querySelector('#badd').onclick = async () => {
-        const amount = Number(result.querySelector('#bqty').value) || bu.num;
-        await addEntry({ name: f.name, unit: f.unit, qty: amount / bu.num, per: f.per, brand: f.brand, barcode: f.barcode, image: f.image }); closeSheet(back);
+        const amount = Number(result.querySelector('#bqty').value) || dq;
+        await addEntry({ name: f.name, unit: f.unit, qty: amount, per: f.per, brand: f.brand, barcode: f.barcode, image: f.image, per100: f.per100, gPerUom: f.gPerUom }); closeSheet(back);
       };
     } catch { result.innerHTML = `<div class="empty">Lookup failed.</div>`; }
   }
@@ -810,6 +812,7 @@ async function openEntryDetail(id) {
   const headActions = `<button class="icon-btn" id="dsolve" title="Solve quantity">${svg('calc')}</button>
     <button class="icon-btn" id="dedit" title="Edit details">${svg('edit')}</button>`;
   const back = openSheet(e.name || 'Item', `
+    ${e.brand ? `<div class="detail-brand">${esc(e.brand)}</div>` : ''}
     ${e.image ? `<div class="detail-img"><img src="${e.image}" alt=""></div>` : ''}
     <div class="qty-stepper">
       <button class="step" id="qminus">${svg('minus')}</button>
