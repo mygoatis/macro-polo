@@ -1,5 +1,5 @@
 // app.js — Macro Polo main controller.
-const APP_VERSION = 'v36';
+const APP_VERSION = 'v37';
 import * as DB from './db.js';
 import { lineChart, attachScrub, resetScrubData } from './charts.js';
 import * as AI from './ai.js';
@@ -36,6 +36,11 @@ const RANGE_LABEL = { '7': '1W', '30': '1M', '90': '3M', '180': '6M', '365': '1Y
 const UNIT_G = { g: 1, oz: 28.3495, lb: 453.592, mg: 0.001, kg: 1000, ml: 1, cup: 240, tbsp: 15, tsp: 5, serving: 100, piece: 50, slice: 30 };
 const MASS_UNITS = new Set(['g', 'oz', 'lb', 'mg', 'kg']);
 const UOM_LIST = ['g', 'oz', 'ml', 'cup', 'tbsp', 'tsp', 'serving', 'piece', 'slice'];
+function uomOptions(sel) {
+  const inList = UOM_LIST.includes(sel);
+  return UOM_LIST.map((u) => `<option value="${u}" ${u === sel ? 'selected' : ''}>${u}</option>`).join('')
+    + (inList ? '' : `<option value="${esc(sel)}" selected>${esc(sel)}</option>`);
+}
 
 // Resolve an entry/food to a per-100g model + its unit. New foods store per100/gPerUom;
 // legacy entries (per + unit string) are derived best-effort.
@@ -773,14 +778,12 @@ function entryForm(e, opts = {}) {
   const m = unitModel(e);
   const f = (k) => `<div class="field"><label>${META[k].label}${META[k].unit ? ` (${META[k].unit})` : ''}</label>
     <input class="input" data-f="${k}" inputmode="decimal" value="${G(m.per100[k] ?? 0)}"></div>`;
-  const uomOpts = UOM_LIST.map((u) => `<option value="${u}" ${u === m.uom ? 'selected' : ''}>${u}</option>`).join('')
-    + (UOM_LIST.includes(m.uom) ? '' : `<option value="${esc(m.uom)}" selected>${esc(m.uom)}</option>`);
   const amountField = opts.noQty ? '' : `<div class="field"><label>Amount</label><input class="input" data-f="amount" inputmode="decimal" value="${G(m.amount)}"></div>`;
+  const uomField = opts.noUom ? '' : `<div class="field"><label>Unit</label><select class="select" data-f="uom">${uomOptions(m.uom)}</select></div>`;
   return `<div class="field"><label>Name</label><input class="input" data-f="name" value="${esc(e.name)}" placeholder="e.g. Greek yogurt"></div>
     <div class="field" style="margin-top:10px"><label>Brand (optional)</label><input class="input" data-f="brand" value="${esc(e.brand || '')}"></div>
     <div class="field-row" style="margin-top:10px">
-      ${amountField}
-      <div class="field"><label>Unit</label><select class="select" data-f="uom">${uomOpts}</select></div>
+      ${amountField}${uomField}
       <div class="field"><label>Grams / unit</label><input class="input" data-f="gpu" inputmode="decimal" value="${G(m.gPerUom)}"></div>
     </div>
     <div class="section-title" style="margin-top:12px">Nutrition per 100 g</div>
@@ -810,13 +813,13 @@ async function openEntryDetail(id) {
     ${e.image ? `<div class="detail-img"><img src="${e.image}" alt=""></div>` : ''}
     <div class="qty-stepper">
       <button class="step" id="qminus">${svg('minus')}</button>
-      <div class="qty-mid"><input class="qty-in" id="dqty" inputmode="decimal" value="${G(m0.amount)}"><div class="qty-unit" id="dunitlbl">${esc(m0.uom)}</div></div>
+      <div class="qty-mid"><input class="qty-in" id="dqty" inputmode="decimal" value="${G(m0.amount)}"><select class="qty-unit-sel" id="dunitsel" data-f="uom">${uomOptions(m0.uom)}</select></div>
       <button class="step" id="qplus">${svg('plus')}</button>
     </div>
     <div id="dtotals"></div>
     <div id="editblock" class="hidden">
       <div class="divider" style="margin:14px 0"></div>
-      ${entryForm(e, { noQty: true })}
+      ${entryForm(e, { noQty: true, noUom: true })}
       <button class="btn ghost block danger-text" id="ddel" style="margin-top:12px">${svg('trash')} Delete item</button>
     </div>
   `, `<button class="btn ghost" data-close-foot>Cancel</button><button class="btn primary" id="dsave">Save</button>`, headActions);
@@ -842,11 +845,25 @@ async function openEntryDetail(id) {
       <div class="card nut-rows">${nutrientRows(tot, ['carbs', 'protein', 'fat'])}</div>
       <div class="section-title">Micros</div>
       <div class="card nut-rows">${nutrientRows(tot, ['sodium', 'fiber', 'sugar'])}</div>`;
-    const uomSel = back.querySelector('[data-f="uom"]');
-    if (uomSel) back.querySelector('#dunitlbl').textContent = uomSel.value || m0.uom;
   }
   drawTotals();
   qtyIn.addEventListener('input', drawTotals);
+
+  // Switching the stepper unit keeps the total mass constant: convert the amount
+  // into the new unit and update the editable grams-per-unit field to match.
+  const unitSel = back.querySelector('#dunitsel');
+  const gpuEl = back.querySelector('[data-f="gpu"]');
+  let curUom = m0.uom;
+  unitSel.addEventListener('change', () => {
+    const oldGpu = MASS_UNITS.has(curUom) ? UNIT_G[curUom] : (Number(gpuEl?.value) || m0.gPerUom || 100);
+    const grams = (Number(qtyIn.value) || 0) * oldGpu;
+    const newUom = unitSel.value;
+    const newGpu = MASS_UNITS.has(newUom) ? UNIT_G[newUom] : (Number(gpuEl?.value) && curUom === newUom ? Number(gpuEl.value) : (UNIT_G[newUom] || 100));
+    if (gpuEl) gpuEl.value = G(newGpu);
+    qtyIn.value = G(newGpu ? grams / newGpu : 0);
+    curUom = newUom;
+    drawTotals();
+  });
   back.querySelector('#qminus').onclick = () => { qtyIn.value = Math.max(0, G((Number(qtyIn.value) || 0) - 0.5)); drawTotals(); };
   back.querySelector('#qplus').onclick = () => { qtyIn.value = G((Number(qtyIn.value) || 0) + 0.5); drawTotals(); };
   back.querySelectorAll('[data-f]').forEach((el) => el.addEventListener('input', drawTotals));
