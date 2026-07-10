@@ -1,5 +1,5 @@
 // app.js — Macro Polo main controller.
-const APP_VERSION = 'v1.38';
+const APP_VERSION = 'v1.39';
 import * as DB from './db.js';
 import { lineChart, attachScrub, resetScrubData } from './charts.js';
 import * as AI from './ai.js';
@@ -525,6 +525,7 @@ async function addEntry({ name, unit, qty, per, foodId, brand, barcode, per100, 
   const entry = { id: DB.uid(), date: S.date, name, brand: brand || '', unit: unit || '1 serving', qty: qty || 1, per, foodId, order: await nextOrder(S.date) };
   if (per100) entry.per100 = per100;
   if (gPerUom) entry.gPerUom = gPerUom;
+  if (barcode) entry.barcode = barcode;
   if (image) entry.image = image;
   await DB.putEntry(entry);
   await ensureLibrary({ name, unit: entry.unit, per, foodId, brand, barcode, qty: entry.qty, per100, gPerUom, image });
@@ -550,6 +551,65 @@ async function ensureLibrary({ name, unit, per, foodId, brand, barcode, qty, per
   } else {
     await DB.putFood({ id: DB.uid(), name, unit, per, brand, barcode, per100, gPerUom, image, useCount: 1, lastUsed: Date.now(), lastQty: qty != null ? qty : 1 });
   }
+}
+
+// Grams in one unit for an entry, given a fresh serving size from Open Food Facts.
+function gramsForUnit(unit, servingGrams, prevGpu) {
+  const u = (unit || 'g').toLowerCase();
+  if (MASS_UNITS.has(u)) return UNIT_G[u];
+  if (u === 'serving') return servingGrams || prevGpu || 100;
+  if (UNIT_G[u] != null) return UNIT_G[u];
+  return prevGpu || 100;
+}
+
+// One-time repair for foods scanned before the unit-conversion fix: re-fetch each
+// barcode item from Open Food Facts and rewrite its brand + per-100-g nutrition, keeping
+// each logged entry's amount and unit (so calorie totals are preserved but now scale right).
+async function migrateBarcodeFoods(onProgress) {
+  const foods = await DB.getFoods();
+  const coded = foods.filter((f) => f.barcode);
+  const byName = new Map();
+  for (const f of coded) byName.set((f.name || '').toLowerCase(), f);
+
+  const cache = new Map();
+  const lookup = async (code) => {
+    if (cache.has(code)) return cache.get(code);
+    let r = null; try { r = await lookupBarcode(code); } catch {}
+    cache.set(code, r); return r;
+  };
+
+  const entries = await DB.getAllEntries();
+  const targets = entries.filter((e) => e.barcode || byName.has((e.name || '').toLowerCase()));
+  const total = coded.length + targets.length;
+  let done = 0; const tick = () => { done++; if (onProgress) onProgress(done, total); };
+
+  let foodsFixed = 0, entriesFixed = 0, failed = 0;
+
+  for (const f of coded) {
+    const fresh = await lookup(f.barcode);
+    if (!fresh) { failed++; tick(); continue; }
+    f.per100 = fresh.per100; f.gPerUom = fresh.gPerUom; f.unit = fresh.unit; f.per = fresh.per;
+    if (fresh.brand) f.brand = fresh.brand;
+    if (fresh.image && !f.image) f.image = fresh.image;
+    f.servingGrams = fresh.servingGrams || null;
+    await DB.putFood(f); foodsFixed++; tick();
+  }
+
+  for (const e of targets) {
+    const code = e.barcode || byName.get((e.name || '').toLowerCase())?.barcode;
+    const fresh = code ? await lookup(code) : null;
+    if (!fresh) { tick(); continue; }
+    e.per100 = fresh.per100;
+    if (!e.barcode) e.barcode = code;
+    if (fresh.brand && !e.brand) e.brand = fresh.brand;
+    if (fresh.image && !e.image) e.image = fresh.image;
+    const g = gramsForUnit(e.unit, fresh.servingGrams, e.gPerUom);
+    e.gPerUom = g;
+    e.per = {}; for (const k of NUTRIENTS) e.per[k] = (e.per100[k] || 0) * g / 100;
+    await DB.putEntry(e); entriesFixed++; tick();
+  }
+
+  return { foodsFixed, entriesFixed, failed };
 }
 
 // One-time: seed the library from previously-logged real foods (skip MFP day summaries).
@@ -1206,8 +1266,21 @@ async function openSettings() {
       <button class="btn sm" id="setinstall">Install app</button>
     </div>
     <input type="file" id="importfile" accept="application/json,.json" style="display:none">
+    <button class="btn sm block" id="setfix" style="margin-top:8px">Fix scanned foods</button>
+    <div class="faint" style="font-size:12px;margin-top:6px">Re-fetches barcode-scanned foods from Open Food Facts and corrects their brand and per-unit nutrition. Totals stay the same.</div>
     <button class="faint center" id="setver" style="font-size:12px;margin-top:14px;width:100%;background:none">Macro Polo ${APP_VERSION} · tap to force update</button>
   `, `<button class="btn ghost" data-close-foot>Cancel</button><button class="btn primary" id="setsave">Save</button>`);
+  back.querySelector('#setfix').onclick = async () => {
+    const btn = back.querySelector('#setfix'); btn.disabled = true; btn.textContent = 'Fixing…';
+    try {
+      const r = await migrateBarcodeFoods((done, total) => { btn.textContent = `Fixing… ${done}/${total}`; });
+      const bits = [`${r.entriesFixed} logged`, `${r.foodsFixed} saved`];
+      if (r.failed) bits.push(`${r.failed} not found`);
+      toast(`Fixed ${bits.join(', ')}`);
+      render();
+    } catch { toast('Fix failed. Check your connection.'); }
+    finally { btn.disabled = false; btn.textContent = 'Fix scanned foods'; }
+  };
   back.querySelector('#setver').onclick = async () => {
     toast('Updating…');
     try { if ('serviceWorker' in navigator) { const regs = await navigator.serviceWorker.getRegistrations(); for (const r of regs) await r.unregister(); } } catch {}

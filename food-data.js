@@ -72,6 +72,7 @@ function mapProduct(p) {
     barcode: p.code || '',
     image: p.image_small_url || '',
     servingLabel: (p.serving_size || '').trim(),
+    servingGrams: gServing || null,
     unit, gPerUom, qty, per100, per,
   };
 }
