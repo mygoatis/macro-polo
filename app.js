@@ -1,5 +1,5 @@
 // app.js — Macro Polo main controller.
-const APP_VERSION = 'v1.39';
+const APP_VERSION = 'v1.40';
 import * as DB from './db.js';
 import { lineChart, attachScrub, resetScrubData } from './charts.js';
 import * as AI from './ai.js';
@@ -547,6 +547,7 @@ async function ensureLibrary({ name, unit, per, foodId, brand, barcode, qty, per
     if (qty != null) f.lastQty = qty;
     if (per100) f.per100 = per100; if (gPerUom) f.gPerUom = gPerUom;
     if (image && !f.image) f.image = image; if (brand && !f.brand) f.brand = brand;
+    if (barcode && !f.barcode) f.barcode = barcode;
     await DB.putFood(f);
   } else {
     await DB.putFood({ id: DB.uid(), name, unit, per, brand, barcode, per100, gPerUom, image, useCount: 1, lastUsed: Date.now(), lastQty: qty != null ? qty : 1 });
@@ -883,7 +884,8 @@ async function openEntryDetail(id) {
     <div id="editblock" class="hidden">
       <div class="divider" style="margin:14px 0"></div>
       ${entryForm(e, { noQty: true, noUom: true })}
-      <button class="btn ghost block danger-text" id="ddel" style="margin-top:12px">${svg('trash')} Delete item</button>
+      <button class="btn ghost block" id="drefresh" style="margin-top:12px">${svg('barcode')} Refresh from barcode</button>
+      <button class="btn ghost block danger-text" id="ddel" style="margin-top:8px">${svg('trash')} Delete item</button>
     </div>
   `, `<button class="btn ghost" data-close-foot>Cancel</button><button class="btn primary" id="dsave">Save</button>`, headActions);
 
@@ -946,6 +948,35 @@ async function openEntryDetail(id) {
   back.querySelector('#ddel').onclick = async () => {
     await DB.deleteEntries([e.id]); closeSheet(back);
     toast('Item deleted', async () => { await DB.putEntry(e); render(); }); render();
+  };
+  back.querySelector('#drefresh').onclick = async () => {
+    const btn = back.querySelector('#drefresh'); const orig = btn.innerHTML;
+    btn.disabled = true; btn.textContent = 'Refreshing…';
+    try {
+      let code = e.barcode;
+      if (!code) {
+        const foods = await DB.getFoods();
+        code = foods.find((x) => x.barcode && (x.name || '').toLowerCase() === (e.name || '').toLowerCase())?.barcode;
+      }
+      if (!code) { toast('No barcode on file. Re-scan to add one.'); return; }
+      const fresh = await lookupBarcode(code);
+      if (!fresh) { toast('Product not found in Open Food Facts.'); return; }
+      // Write corrected per-100g nutrition into the form and fix grams-per-unit for the
+      // current stepper unit, keeping the amount so the calorie total stays the same.
+      for (const k of NUTRIENTS) { const el = back.querySelector(`[data-f="${k}"]`); if (el) el.value = G(fresh.per100[k] ?? 0); }
+      const uomV = (unitSel.value || 'serving').toLowerCase();
+      const g = MASS_UNITS.has(uomV) ? UNIT_G[uomV]
+        : uomV === 'serving' ? (fresh.servingGrams || Number(gpuEl?.value) || 100)
+        : (UNIT_G[uomV] != null ? UNIT_G[uomV] : (fresh.servingGrams || 100));
+      if (gpuEl) gpuEl.value = G(g);
+      const brandEl = back.querySelector('[data-f="brand"]'); if (brandEl && !brandEl.value && fresh.brand) brandEl.value = fresh.brand;
+      if (fresh.image && !e.image) e.image = fresh.image;
+      e.barcode = code;
+      m0.per100 = fresh.per100; m0.gPerUom = g;
+      drawTotals();
+      toast('Refreshed from barcode. Tap Save to keep it.');
+    } catch { toast('Refresh failed. Check your connection.'); }
+    finally { btn.disabled = false; btn.innerHTML = orig; }
   };
 }
 
