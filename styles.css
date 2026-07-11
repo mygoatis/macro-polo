@@ -499,6 +499,17 @@ body.anim .cal-float { animation: mp-float 1s ease forwards; }
 .prog-row { display: flex; gap: 8px; align-items: center; }
 .prog-row .input { flex: 1; min-width: 0; padding: 12px 8px; text-align: center; }
 .prog-row .icon-btn { flex: none; }
+.prog-row2 { display: flex; gap: 10px; align-items: flex-end; }
+.prog-field { flex: 1; min-width: 0; }
+.prog-field label { display: block; font-size: 12px; color: var(--text-faint); margin-bottom: 5px; }
+.prog-inwrap { position: relative; }
+.prog-in { width: 100%; padding: 12px 8px; text-align: center; }
+.prog-ring { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.prog-inwrap.logged .prog-in { border-color: var(--cal); color: var(--cal); font-weight: 600; background: rgba(79, 170, 112, 0.09); }
+.prog-btns { display: flex; gap: 8px; align-items: center; flex: none; }
+.mult-row { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.mult { min-width: 48px; height: 38px; border-radius: 10px; border: 1px solid var(--cal); background: transparent; color: var(--cal); font-size: 15px; font-weight: 600; }
+.mult:active { transform: scale(0.96); }
 .icon-btn.primary { background: var(--cal); color: var(--on-accent); }
 .photo-inline { flex: none; width: 44px; height: 44px; border-radius: 11px; background-size: cover; background-position: center; background-color: var(--bg-elev-2); border: 1px solid var(--line); display: grid; place-items: center; color: var(--text-dim); position: relative; overflow: hidden; padding: 0; }
 .photo-inline svg { width: 20px; height: 20px; }

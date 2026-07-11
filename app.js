@@ -1,5 +1,5 @@
 // app.js — Macro Polo main controller.
-const APP_VERSION = 'v1.40';
+const APP_VERSION = 'v1.41';
 import * as DB from './db.js';
 import { lineChart, attachScrub, resetScrubData } from './charts.js';
 import * as AI from './ai.js';
@@ -36,6 +36,8 @@ const RANGE_LABEL = { '7': '1W', '30': '1M', '90': '3M', '180': '6M', '365': '1Y
 const UNIT_G = { g: 1, oz: 28.3495, lb: 453.592, mg: 0.001, kg: 1000, ml: 1, cup: 240, tbsp: 15, tsp: 5, serving: 100, piece: 50, slice: 30 };
 const MASS_UNITS = new Set(['g', 'oz', 'lb', 'mg', 'kg']);
 const UOM_LIST = ['g', 'oz', 'ml', 'cup', 'tbsp', 'tsp', 'serving', 'piece', 'slice'];
+// Quick multipliers under the amount stepper — each scales the current amount.
+const MULTIPLIERS = [['⅓', 1 / 3], ['½', 0.5], ['⅔', 2 / 3], ['1.5', 1.5], ['2', 2], ['3', 3]];
 function uomOptions(sel) {
   const inList = UOM_LIST.includes(sel);
   return UOM_LIST.map((u) => `<option value="${u}" ${u === sel ? 'selected' : ''}>${u}</option>`).join('')
@@ -342,12 +344,13 @@ async function renderFood() {
   }
   if (!entries.length) listHTML = `<div class="empty">Nothing logged yet.<br>Tap “Add food” to start.</div>`;
 
-  const allSel = entries.length > 0 && entries.every((e) => S.selection.has(e.id));
-  const listHead = entries.length
-    ? `<div class="list-head"><button class="check ${allSel ? 'sel' : ''}" data-act="select-all">${allSel ? svg('check') : ''}</button><span class="faint">Select all</span></div>`
-    : '';
+  // Long-press any checkbox to select all (hint shown once).
+  if (entries.length && !localStorage.getItem('mp.hintSel')) {
+    localStorage.setItem('mp.hintSel', '1');
+    setTimeout(() => toast('Tip: hold a checkbox to select all'), 500);
+  }
 
-  return `<div class="screen${slideCls}">${summary}${actions}${listHead}<div>${listHTML}</div></div>`;
+  return `<div class="screen${slideCls}">${summary}${actions}<div>${listHTML}</div></div>`;
 }
 
 function renderSelbar() {
@@ -398,13 +401,29 @@ async function renderBody() {
   const wPts = ranged.filter((r) => r.weight != null).map((r) => ({ x: r.date, y: r.weight }));
   const sPts = ranged.filter((r) => r.waist != null).map((r) => ({ x: r.date, y: r.waist }));
 
+  // Placeholder shows the most recent prior value so the trend is visible on empty days.
+  const priorW = [...all].reverse().find((r) => r.date < S.date && r.weight != null);
+  const priorS = [...all].reverse().find((r) => r.date < S.date && r.waist != null);
+  const ring = `<svg class="prog-ring" preserveAspectRatio="xMidYMid meet"><rect fill="none" stroke="var(--cal)" stroke-width="2" stroke-linecap="round"></rect></svg>`;
   const quick = `<div class="card">
-    <div class="prog-row">
-      <input class="input" id="qw" inputmode="decimal" placeholder="Weight" value="${today.weight ?? ''}">
-      <input class="input" id="qs" inputmode="decimal" placeholder="Waist" value="${today.waist ?? ''}">
-      ${photoInline(today, S.date)}
-      <button class="icon-btn" data-act="body-pickdate" title="Change date">${svg('calendar')}</button>
-      <button class="icon-btn primary" data-act="body-save" title="Save">${svg('check')}</button>
+    <div class="prog-row2">
+      <div class="prog-field">
+        <label>Weight (${u.weight})</label>
+        <div class="prog-inwrap ${today.weight != null ? 'logged' : ''}" id="wwrap">
+          <input class="input prog-in" id="qw" inputmode="decimal" placeholder="${priorW ? G(priorW.weight) : 'Weight'}" value="${today.weight ?? ''}">${ring}
+        </div>
+      </div>
+      <div class="prog-field">
+        <label>Waist (${u.length})</label>
+        <div class="prog-inwrap ${today.waist != null ? 'logged' : ''}" id="swrap">
+          <input class="input prog-in" id="qs" inputmode="decimal" placeholder="${priorS ? G(priorS.waist) : 'Waist'}" value="${today.waist ?? ''}">${ring}
+        </div>
+      </div>
+      <div class="prog-btns">
+        ${photoInline(today, S.date)}
+        <button class="icon-btn" data-act="body-pickdate" title="Change date">${svg('calendar')}</button>
+        <button class="icon-btn primary" data-act="body-save" title="Save">${svg('check')}</button>
+      </div>
     </div>
     <input type="date" id="bodydate" value="${S.date}" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0">
     <input type="file" id="qphotofile" accept="image/*" capture="environment" style="display:none">
@@ -870,16 +889,24 @@ async function openEntryDetail(id) {
   const entries = await DB.getEntries(S.date);
   const e = entries.find((x) => x.id === id); if (!e) return;
   const m0 = unitModel(e);
+  // Show a photo even when the entry lacks one, by borrowing its library food's image.
+  let img = e.image;
+  if (!img) {
+    const foods = await DB.getFoods();
+    const m = foods.find((f) => (e.foodId && f.id === e.foodId) || (e.barcode && f.barcode === e.barcode) || (f.name || '').toLowerCase() === (e.name || '').toLowerCase());
+    if (m && m.image) img = m.image;
+  }
   const headActions = `<button class="icon-btn" id="dsolve" title="Solve quantity">${svg('calc')}</button>
     <button class="icon-btn" id="dedit" title="Edit details">${svg('edit')}</button>`;
   const back = openSheet(e.name || 'Item', `
     ${e.brand ? `<div class="detail-brand">${esc(e.brand)}</div>` : ''}
-    ${e.image ? `<div class="detail-img"><img src="${e.image}" alt=""></div>` : ''}
+    ${img ? `<div class="detail-img"><img src="${img}" alt=""></div>` : ''}
     <div class="qty-stepper">
       <button class="step" id="qminus">${svg('minus')}</button>
       <div class="qty-mid"><input class="qty-in" id="dqty" inputmode="decimal" value="${G(m0.amount)}"><select class="qty-unit-sel" id="dunitsel" data-f="uom">${uomOptions(m0.uom)}</select></div>
       <button class="step" id="qplus">${svg('plus')}</button>
     </div>
+    <div class="mult-row">${MULTIPLIERS.map(([lbl, v]) => `<button class="mult" data-mult="${v}">${lbl}</button>`).join('')}</div>
     <div id="dtotals"></div>
     <div id="editblock" class="hidden">
       <div class="divider" style="margin:14px 0"></div>
@@ -931,6 +958,7 @@ async function openEntryDetail(id) {
   });
   back.querySelector('#qminus').onclick = () => { qtyIn.value = Math.max(0, G((Number(qtyIn.value) || 0) - 0.5)); drawTotals(); };
   back.querySelector('#qplus').onclick = () => { qtyIn.value = G((Number(qtyIn.value) || 0) + 0.5); drawTotals(); };
+  back.querySelectorAll('.mult').forEach((b) => b.onclick = () => { qtyIn.value = G((Number(qtyIn.value) || 0) * Number(b.dataset.mult)); haptic(6); drawTotals(); });
   back.querySelectorAll('[data-f]').forEach((el) => el.addEventListener('input', drawTotals));
 
   back.querySelector('#dedit').onclick = () => {
@@ -1376,6 +1404,25 @@ function compressImage(file, maxDim = 1280, quality = 0.82) {
 }
 
 // ---------------- Global events ----------------
+// Long-press a food checkbox to select every item in the day.
+let lpTimer = null, lpFired = false, lpStart = null;
+document.addEventListener('pointerdown', (e) => {
+  const tog = e.target.closest('[data-act="toggle"]');
+  if (!tog) return;
+  lpFired = false; lpStart = { x: e.clientX, y: e.clientY };
+  lpTimer = setTimeout(async () => {
+    lpTimer = null; lpFired = true; haptic(14);
+    const es = await DB.getEntries(S.date); es.forEach((x) => S.selection.add(x.id)); render();
+    toast(`${es.length} selected`);
+  }, 450);
+});
+document.addEventListener('pointermove', (e) => {
+  if (!lpTimer || !lpStart) return;
+  if (Math.hypot(e.clientX - lpStart.x, e.clientY - lpStart.y) > 10) { clearTimeout(lpTimer); lpTimer = null; }
+});
+['pointerup', 'pointercancel', 'pointerleave'].forEach((ev) =>
+  document.addEventListener(ev, () => { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } }));
+
 document.addEventListener('click', async (e) => {
   const t = e.target.closest('[data-act]'); if (!t) return;
   const act = t.dataset.act;
@@ -1389,7 +1436,7 @@ document.addEventListener('click', async (e) => {
     case 'add-food': openAddFood(); break;
     case 'copy-day': openCopyDay(); break;
     case 'entry': openEntryDetail(t.dataset.id); break;
-    case 'toggle': { const id = t.dataset.id; S.selection.has(id) ? S.selection.delete(id) : S.selection.add(id); render(); break; }
+    case 'toggle': { if (lpFired) { lpFired = false; break; } const id = t.dataset.id; S.selection.has(id) ? S.selection.delete(id) : S.selection.add(id); render(); break; }
     case 'sel-copy': openCopySelected(); break;
     case 'sel-delete': await deleteSelected(); break;
     case 'sel-clear': S.selection.clear(); render(); break;
@@ -1429,9 +1476,24 @@ async function saveBodyQuick() {
   const w = document.getElementById('qw').value.trim(), s = document.getElementById('qs').value.trim();
   const cur = (await DB.getBody(S.date)) || { date: S.date };
   await DB.putBody({ ...cur, date: S.date, weight: w === '' ? null : Number(w), waist: s === '' ? null : Number(s) });
-  const btn = document.querySelector('[data-act="body-save"]');
-  if (btn && animOn) { btn.classList.remove('btn-pop'); void btn.offsetWidth; btn.classList.add('btn-pop'); }
-  haptic(10); toast('Saved'); render();
+  haptic(10);
+  // Confirmation: turn each just-logged field green and draw its border in.
+  let animated = false;
+  if (w !== '') { const wr = document.getElementById('wwrap'); if (wr) { wr.classList.add('logged'); if (animOn) { drawProgBorder(wr); animated = true; } } }
+  if (s !== '') { const sr = document.getElementById('swrap'); if (sr) { sr.classList.add('logged'); if (animOn) { drawProgBorder(sr); animated = true; } } }
+  toast('Saved');
+  setTimeout(() => render(), animated ? 650 : 0);
+}
+// Draw a crisp green border around a field using a viewBox matched to its pixel size.
+function drawProgBorder(wrap) {
+  const svg = wrap.querySelector('.prog-ring'); const rect = svg && svg.querySelector('rect'); if (!rect) return;
+  const r = wrap.getBoundingClientRect(); const W = Math.round(r.width), H = Math.round(r.height);
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  rect.setAttribute('x', 1); rect.setAttribute('y', 1); rect.setAttribute('width', W - 2); rect.setAttribute('height', H - 2); rect.setAttribute('rx', 10);
+  const len = rect.getTotalLength();
+  rect.style.transition = 'none'; rect.style.strokeDasharray = len; rect.style.strokeDashoffset = len;
+  void rect.getBoundingClientRect();
+  rect.style.transition = 'stroke-dashoffset .5s ease'; rect.style.strokeDashoffset = '0';
 }
 function setBodyRange(r) { S.body.mode = r; if (r === 'custom' && !S.body.from) { S.body.from = addDays(todayStr(), -30); S.body.to = todayStr(); } render(); }
 function setChartRange(r) { S.chart.mode = r; if (r === 'custom' && !S.chart.from) { S.chart.from = addDays(todayStr(), -30); S.chart.to = todayStr(); } render(); }
