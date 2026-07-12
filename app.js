@@ -1,5 +1,5 @@
 // app.js — Macro Polo main controller.
-const APP_VERSION = 'v1.42';
+const APP_VERSION = 'v1.43';
 import * as DB from './db.js';
 import { lineChart, attachScrub, resetScrubData } from './charts.js';
 import * as AI from './ai.js';
@@ -917,6 +917,8 @@ async function openEntryDetail(id) {
       <div class="divider" style="margin:14px 0"></div>
       ${entryForm(e, { noQty: true, noUom: true })}
       <button class="btn ghost block" id="drefresh" style="margin-top:12px">${svg('barcode')} Refresh from barcode</button>
+      <button class="btn ghost block" id="dphoto" style="margin-top:8px">${svg('camera')} Add / change photo</button>
+      <input type="file" id="dphotofile" accept="image/*" style="display:none">
       <button class="btn ghost block danger-text" id="ddel" style="margin-top:8px">${svg('trash')} Delete item</button>
     </div>
   `, `<button class="btn ghost" data-close-foot>Cancel</button><button class="btn primary" id="dsave">Save</button>`, headActions);
@@ -992,6 +994,22 @@ async function openEntryDetail(id) {
   back.querySelector('#ddel').onclick = async () => {
     await DB.deleteEntries([e.id]); closeSheet(back);
     toast('Item deleted', async () => { await DB.putEntry(e); render(); }); render();
+  };
+  back.querySelector('#dphoto').onclick = () => back.querySelector('#dphotofile').click();
+  back.querySelector('#dphotofile').onchange = async (ev) => {
+    const file = ev.target.files[0]; if (!file) return;
+    const url = await compressImage(file, 640, 0.8);
+    e.image = url;
+    const body = back.querySelector('.sheet-body');
+    let d = body.querySelector('.detail-img');
+    if (d) d.querySelector('img').src = url;
+    else body.insertBefore(node(`<div class="detail-img"><img src="${url}" alt=""></div>`), body.querySelector('.qty-stepper'));
+    await DB.putEntry(e);
+    // Stamp the library food too, so re-logs and the list thumbnail get the photo.
+    const foods = await DB.getFoods();
+    const m = foods.find((f) => (e.foodId && f.id === e.foodId) || (e.barcode && f.barcode === e.barcode) || (f.name || '').toLowerCase() === (e.name || '').toLowerCase());
+    if (m) { m.image = url; await DB.putFood(m); }
+    toast('Photo added');
   };
   back.querySelector('#drefresh').onclick = async () => {
     const btn = back.querySelector('#drefresh'); const orig = btn.innerHTML;
