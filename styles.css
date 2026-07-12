@@ -507,6 +507,11 @@ body.anim .cal-float { animation: mp-float 1s ease forwards; }
 .prog-ring { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .prog-inwrap.logged .prog-in { border-color: var(--cal); color: var(--cal); font-weight: 600; background: rgba(79, 170, 112, 0.09); }
 .prog-btns { display: flex; gap: 8px; align-items: center; flex: none; }
+.sort-list { display: flex; flex-direction: column; gap: 4px; }
+.sort-opt { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 14px 14px; border-radius: 12px; background: var(--bg-elev-2); border: 1px solid transparent; color: var(--text); font-size: 15px; text-align: left; }
+.sort-opt.sel { border-color: var(--cal); color: var(--cal); font-weight: 600; }
+.sort-opt svg { width: 20px; height: 20px; }
+.icon-btn.on { color: var(--cal); }
 .mult-row { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 .mult { min-width: 48px; height: 38px; border-radius: 10px; border: 1px solid var(--cal); background: transparent; color: var(--cal); font-size: 15px; font-weight: 600; }
 .mult:active { transform: scale(0.96); }

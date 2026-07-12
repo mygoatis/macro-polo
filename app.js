@@ -1,5 +1,5 @@
 // app.js — Macro Polo main controller.
-const APP_VERSION = 'v1.41';
+const APP_VERSION = 'v1.42';
 import * as DB from './db.js';
 import { lineChart, attachScrub, resetScrubData } from './charts.js';
 import * as AI from './ai.js';
@@ -15,6 +15,7 @@ const S = {
   chart: { metric: 'kcal', mode: '30', from: null, to: null },
   chat: [],
   pendingActions: null,
+  sort: 'manual', // manual | kcal | carbs | protein | fat | az
 };
 
 const NUTRIENTS = ['kcal', 'protein', 'carbs', 'fat', 'sodium', 'fiber', 'sugar'];
@@ -107,6 +108,7 @@ const I = {
   image: '<rect x="3" y="4" width="18" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="8.5" cy="9.5" r="1.8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M4 17l5-5 4 4 3-3 4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
   barcode: '<path d="M4 6v12M7 6v12M10 6v12M13 6v12M16 6v12M20 6v12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
   search: '<circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="m20 20-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+  sort: '<path d="M8 5v14M8 19l-3.5-3.5M8 19l3.5-3.5M16 19V5M16 5l-3.5 3.5M16 5l3.5 3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
   spark: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8Z M19 14l.8 2.2L22 17l-2.2.8L19 20l-.8-2.2L16 17l2.2-.8Z" fill="currentColor"/>',
   chevL: '<path d="M15 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>',
   chevR: '<path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>',
@@ -280,10 +282,11 @@ function dateNav() {
 }
 
 function header() {
+  const sortBtn = `<button class="icon-btn ${S.sort !== 'manual' ? 'on' : ''}" data-act="sort" title="Sort foods">${svg('sort')}</button>`;
   const actions = `<button class="icon-btn" data-act="chat" title="Dietician">${svg('spark')}</button><button class="icon-btn" data-act="settings">${svg('gear')}</button>`;
   if (S.tab === 'food') {
     return `<div class="app-header">
-      <div class="row"><span class="brand-mark" aria-hidden="true"></span><h1 class="brand-title">Macro Polo</h1>${actions}</div>
+      <div class="row"><span class="brand-mark" aria-hidden="true"></span><h1 class="brand-title">Macro Polo</h1>${sortBtn}${actions}</div>
       ${dateNav()}</div>`;
   }
   if (S.tab === 'nutrients' || S.tab === 'body') {
@@ -301,6 +304,8 @@ function tabbar() {
 // ---------- Food tab ----------
 async function renderFood() {
   const entries = await DB.getEntries(S.date);
+  if (S.sort === 'az') entries.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  else if (S.sort !== 'manual') entries.sort((a, b) => (entryTotals(b)[S.sort] || 0) - (entryTotals(a)[S.sort] || 0));
   const totals = sumTotals(entries);
 
   // decide whether to animate (only when the day's totals actually changed)
@@ -410,13 +415,13 @@ async function renderBody() {
       <div class="prog-field">
         <label>Weight (${u.weight})</label>
         <div class="prog-inwrap ${today.weight != null ? 'logged' : ''}" id="wwrap">
-          <input class="input prog-in" id="qw" inputmode="decimal" placeholder="${priorW ? G(priorW.weight) : 'Weight'}" value="${today.weight ?? ''}">${ring}
+          <input class="input prog-in" id="qw" inputmode="decimal" placeholder="Weight" value="${today.weight ?? (priorW ? G(priorW.weight) : '')}">${ring}
         </div>
       </div>
       <div class="prog-field">
         <label>Waist (${u.length})</label>
         <div class="prog-inwrap ${today.waist != null ? 'logged' : ''}" id="swrap">
-          <input class="input prog-in" id="qs" inputmode="decimal" placeholder="${priorS ? G(priorS.waist) : 'Waist'}" value="${today.waist ?? ''}">${ring}
+          <input class="input prog-in" id="qs" inputmode="decimal" placeholder="Waist" value="${today.waist ?? (priorS ? G(priorS.waist) : '')}">${ring}
         </div>
       </div>
       <div class="prog-btns">
@@ -533,7 +538,7 @@ async function renderCharts() {
   return `<div class="screen"><div class="card">
     <div class="range-seg" style="margin-bottom:10px">${metricBtns}</div>
     <div class="range-seg dates">${rangeBtns}</div>${customRow}${stats}
-    ${lineChart(pts, { color, height: 250, unit: unitOf(metric), round: metric === 'kcal' })}
+    ${lineChart(pts, { color, height: 250, unit: unitOf(metric), round: metric === 'kcal', yMin: 0, yMax: (metric === 'kcal' && pts.some((p) => p.y > 4000)) ? 4000 : undefined })}
   </div></div>`;
 }
 
@@ -890,11 +895,11 @@ async function openEntryDetail(id) {
   const e = entries.find((x) => x.id === id); if (!e) return;
   const m0 = unitModel(e);
   // Show a photo even when the entry lacks one, by borrowing its library food's image.
-  let img = e.image;
+  let img = e.image, code = e.barcode;
   if (!img) {
     const foods = await DB.getFoods();
     const m = foods.find((f) => (e.foodId && f.id === e.foodId) || (e.barcode && f.barcode === e.barcode) || (f.name || '').toLowerCase() === (e.name || '').toLowerCase());
-    if (m && m.image) img = m.image;
+    if (m) { if (m.image) img = m.image; if (!code && m.barcode) code = m.barcode; }
   }
   const headActions = `<button class="icon-btn" id="dsolve" title="Solve quantity">${svg('calc')}</button>
     <button class="icon-btn" id="dedit" title="Edit details">${svg('edit')}</button>`;
@@ -915,6 +920,17 @@ async function openEntryDetail(id) {
       <button class="btn ghost block danger-text" id="ddel" style="margin-top:8px">${svg('trash')} Delete item</button>
     </div>
   `, `<button class="btn ghost" data-close-foot>Cancel</button><button class="btn primary" id="dsave">Save</button>`, headActions);
+
+  // No photo yet but we have a barcode: fetch it lazily and slot it in (then keep it).
+  if (!img && code) {
+    lookupBarcode(code).then(async (fresh) => {
+      if (!fresh || !fresh.image || !back.isConnected) return;
+      const body = back.querySelector('.sheet-body'); const stepper = body.querySelector('.qty-stepper');
+      const div = node(`<div class="detail-img"><img src="${esc(fresh.image)}" alt=""></div>`);
+      body.insertBefore(div, stepper);
+      e.image = fresh.image; try { await DB.putEntry(e); } catch {}
+    }).catch(() => {});
+  }
 
   const qtyIn = back.querySelector('#dqty');
   const totalsEl = back.querySelector('#dtotals');
@@ -1204,7 +1220,9 @@ async function openChat() {
     </div>`,
     `<button class="icon-btn" id="chatclear" title="Clear conversation">${svg('trash')}</button>`);
   const log = back.querySelector('#chatlog'); const input = back.querySelector('#chatin');
-  const scrollBottom = () => { log.scrollTop = log.scrollHeight; };
+  // The scroll container is the sheet body, not the log itself.
+  const scroller = back.querySelector('.sheet-body');
+  const scrollBottom = () => { scroller.scrollTop = scroller.scrollHeight; };
   let pendingImage = null;
   function drawPreview() {
     const p = back.querySelector('#chatpreview');
@@ -1246,7 +1264,7 @@ async function openChat() {
     if (!S.settings.apiKey) { S.chat.push({ role: 'assistant', text: 'Add your Claude API key in Settings first.' }); draw(); return; }
     S.chat.push({ role: 'user', text, image: img }); input.value = ''; input.style.height = 'auto';
     pendingImage = null; drawPreview(); S.pendingActions = null; DB.saveChat(S.chat); draw();
-    log.innerHTML += `<div class="msg ai thinking"><span class="spinner"></span></div>`; log.scrollTop = log.scrollHeight;
+    log.innerHTML += `<div class="msg ai thinking"><span class="spinner"></span></div>`; scrollBottom();
     try {
       const entries = await DB.getEntries(S.date);
       const today = todayStr();
@@ -1293,6 +1311,20 @@ function describeActions(actions) { return actions.map((a) => a.op === 'setQty' 
 function roundTotals(t) { const o = {}; for (const k of NUTRIENTS) o[k] = K(t[k]); return o; }
 
 // ---------- Settings ----------
+function openSortMenu() {
+  const opts = [
+    ['manual', 'Manual order'],
+    ['kcal', 'Calories (high to low)'],
+    ['carbs', 'Carbs (high to low)'],
+    ['protein', 'Protein (high to low)'],
+    ['fat', 'Fat (high to low)'],
+    ['az', 'Name (A to Z)'],
+  ];
+  const back = openSheet('Sort foods', `<div class="sort-list">${opts.map(([v, label]) =>
+    `<button class="sort-opt ${S.sort === v ? 'sel' : ''}" data-sort="${v}">${label}${S.sort === v ? svg('check') : ''}</button>`).join('')}</div>`);
+  back.querySelectorAll('[data-sort]').forEach((b) => b.onclick = () => { S.sort = b.dataset.sort; closeSheet(back); render(); });
+}
+
 async function openSettings() {
   const s = S.settings;
   const back = openSheet('Settings', `
@@ -1429,6 +1461,7 @@ document.addEventListener('click', async (e) => {
   switch (act) {
     case 'tab': if (t.dataset.tab !== S.tab) tabHistory.push(S.tab); S.tab = t.dataset.tab; S.selection.clear(); render(); break;
     case 'settings': openSettings(); break;
+    case 'sort': openSortMenu(); break;
     case 'chat': openChat(); break;
     case 'date-prev': changeDay(-1); break;
     case 'date-next': changeDay(1); break;
@@ -1509,10 +1542,11 @@ function loadUI() {
       if (u.date) S.date = u.date;
       if (u.tab && ['food', 'nutrients', 'body', 'charts'].includes(u.tab)) S.tab = u.tab;
     }
+    if (u.sort && ['manual', 'kcal', 'carbs', 'protein', 'fat', 'az'].includes(u.sort)) S.sort = u.sort;
   } catch {}
 }
 function saveUI() {
-  try { localStorage.setItem('mp.ui', JSON.stringify({ date: S.date, tab: S.tab, ts: Date.now() })); } catch {}
+  try { localStorage.setItem('mp.ui', JSON.stringify({ date: S.date, tab: S.tab, sort: S.sort, ts: Date.now() })); } catch {}
 }
 
 // ---------------- Boot ----------------
