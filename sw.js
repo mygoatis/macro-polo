@@ -1,5 +1,5 @@
 // Macro Polo service worker — offline-first for the app shell.
-const CACHE = 'macropolo-v1.43';
+const CACHE = 'macropolo-v1.44';
 
 self.addEventListener('message', (e) => { if (e.data === 'skip-waiting') self.skipWaiting(); });
 const SHELL = [
