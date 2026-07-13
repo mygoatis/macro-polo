@@ -1,5 +1,5 @@
 // app.js — Macro Polo main controller.
-const APP_VERSION = 'v1.44';
+const APP_VERSION = 'v1.45';
 import * as DB from './db.js';
 import { lineChart, attachScrub, resetScrubData } from './charts.js';
 import * as AI from './ai.js';
@@ -1518,7 +1518,6 @@ document.addEventListener('pointerdown', (e) => {
   lpTimer = setTimeout(async () => {
     lpTimer = null; lpFired = true; haptic(14);
     const es = await DB.getEntries(S.date); es.forEach((x) => S.selection.add(x.id)); render();
-    toast(`${es.length} selected`);
   }, 450);
 });
 document.addEventListener('pointermove', (e) => {
