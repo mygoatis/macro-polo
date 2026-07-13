@@ -1,5 +1,5 @@
 // app.js — Macro Polo main controller.
-const APP_VERSION = 'v1.45';
+const APP_VERSION = 'v1.46';
 import * as DB from './db.js';
 import { lineChart, attachScrub, resetScrubData } from './charts.js';
 import * as AI from './ai.js';
@@ -747,19 +747,22 @@ function subSearch(host) {
       try {
         const found = await searchFoods(q, S.settings.fdcKey);
         if (!found.length) { results.innerHTML = `<div class="empty">No results.</div>`; return; }
-        results.innerHTML = found.map((f, i) => { const u = parseUnit(f.unit);
+        results.innerHTML = found.map((f, i) => {
+          const kcal = Math.round((f.per100.kcal || 0) * f.gPerUom / 100 * f.amount);
+          const sub = f.servingLabel ? ` <span class="faint" style="font-size:12px">(${esc(f.servingLabel)})</span>` : '';
           return `<div class="list-item food-add" data-i="${i}" style="margin-bottom:8px">
           <div class="fa-name">${esc(f.name)}${f.brand ? ` · <span class="faint">${esc(f.brand)}</span>` : ''}</div>
           <div class="fa-ctrls">
-            <span class="fa-meta">${f.per.kcal} cal</span>
-            <input class="qty-mini" data-qty inputmode="decimal" value="${G(u.num)}"><span class="uom">${esc(u.label)}</span>
+            <span class="fa-meta">${kcal} cal${sub}</span>
+            <input class="qty-mini" data-qty inputmode="decimal" value="${G(f.amount)}"><span class="uom">${esc(f.unit)}</span>
             <button class="btn primary add" data-add>Add</button>
           </div></div>`; }).join('');
         results.querySelectorAll('[data-i]').forEach((el) => {
           el.querySelector('[data-add]').onclick = async () => {
-            const f = found[Number(el.dataset.i)]; const u = parseUnit(f.unit);
-            const amount = Number(el.querySelector('[data-qty]').value) || u.num;
-            await addEntry({ name: f.name, unit: f.unit, qty: amount / u.num, per: f.per, brand: f.brand, barcode: f.barcode });
+            const f = found[Number(el.dataset.i)];
+            const amount = Number(el.querySelector('[data-qty]').value) || f.amount;
+            const per = {}; for (const k of NUTRIENTS) per[k] = (f.per100[k] || 0) * f.gPerUom / 100;
+            await addEntry({ name: f.name, unit: f.unit, qty: amount, per, brand: f.brand, barcode: f.barcode, per100: f.per100, gPerUom: f.gPerUom, serving: f.serving });
             el.querySelector('[data-add]').textContent = 'Added';
           };
         });

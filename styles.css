@@ -380,7 +380,12 @@ input, textarea, select { outline: none; }
 @keyframes toastin { from { transform: translateY(12px); opacity: 0; } }
 
 /* ---------- Misc ---------- */
-.spinner { width: 18px; height: 18px; border: 2px solid var(--line); border-top-color: var(--cal); border-radius: 50%; animation: spin 0.7s linear infinite; }
+/* Three-dot "flashing" loader — self-contained so it works inline (before text) or centered. */
+.spinner { display: inline-block; vertical-align: middle; position: relative; width: 7px; height: 7px; margin: 2px 16px; border-radius: 50%; background: var(--cal); color: var(--cal); animation: dotFlash 1s infinite linear alternate; animation-delay: 0.5s; }
+.spinner::before, .spinner::after { content: ''; position: absolute; top: 0; width: 7px; height: 7px; border-radius: 50%; background: var(--cal); animation: dotFlash 1s infinite alternate; }
+.spinner::before { left: -12px; animation-delay: 0s; }
+.spinner::after { left: 12px; animation-delay: 1s; }
+@keyframes dotFlash { 0% { background: var(--cal); } 50%, 100% { background: var(--line); } }
 @keyframes spin { to { transform: rotate(360deg); } }
 .row-between { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .solve-row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }

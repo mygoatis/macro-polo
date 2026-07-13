@@ -124,13 +124,27 @@ export async function searchFoods(query, apiKey) {
   if (!res.ok) throw new Error('Search failed');
   const data = await res.json();
   return (data.foods || [])
-    .map((f) => ({
-      name: titleish(f.description),
-      brand: titleish(f.brandName || f.brandOwner || ''),
-      barcode: f.gtinUpc || '',
-      unit: '100 g',
-      image: '',
-      per: usdaPer(f),
-    }))
-    .filter((p) => p.per.kcal > 0 && p.name);
+    .map((f) => {
+      const per100 = usdaPer(f);
+      // Branded foods carry a real serving size; raw/whole foods only have per-100g.
+      const ssUnit = (f.servingSizeUnit || '').toLowerCase();
+      let grams = (ssUnit === 'g' || ssUnit === 'ml') ? num(f.servingSize) : 0;
+      // Fall back to the grams inside the household label, e.g. "3/4 cup (20g)".
+      if (!grams && f.householdServingFullText) { const m = /([\d.]+)\s*g\b/i.exec(f.householdServingFullText); if (m) grams = num(m[1]); }
+      const hasServing = grams > 0;
+      const gPerUom = hasServing ? grams : 1;
+      const unit = hasServing ? 'serving' : 'g';
+      const amount = hasServing ? 1 : 100;
+      const per = {}; for (const k in per100) per[k] = per100[k] * gPerUom / 100;
+      return {
+        name: titleish(f.description),
+        brand: titleish(f.brandName || f.brandOwner || ''),
+        barcode: f.gtinUpc || '',
+        image: '',
+        per100, gPerUom, unit, amount, per,
+        serving: { amt: amount, unit, gpu: gPerUom },
+        servingLabel: (f.householdServingFullText || '').trim(),
+      };
+    })
+    .filter((p) => p.per100.kcal > 0 && p.name);
 }
