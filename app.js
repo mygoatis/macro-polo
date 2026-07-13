@@ -1,5 +1,5 @@
 // app.js — Macro Polo main controller.
-const APP_VERSION = 'v1.46';
+const APP_VERSION = 'v1.47';
 import * as DB from './db.js';
 import { lineChart, attachScrub, resetScrubData } from './charts.js';
 import * as AI from './ai.js';
@@ -1041,12 +1041,21 @@ async function openEntryDetail(id) {
     const lu = (unitSel.value || d.unit).trim();    // the logged unit from the stepper
     const glu = gForLoggedUnit(lu);
     const per = {}; for (const k of NUTRIENTS) per[k] = (d.per100[k] || 0) * glu / 100;
-    Object.assign(e, { name: d.name, brand: d.brand, per100: d.per100, serving: d.serving, unit: lu, gPerUom: glu, qty: Number(qtyIn.value) || 0, per });
-    await DB.putEntry(e);
-    // Keep the library's saved facts and last-logged portion in sync with this edit.
+    // Find the library food by the entry's CURRENT identity, before applying a possible rename.
     const foods = await DB.getFoods();
     const lf = foods.find((f) => (e.foodId && f.id === e.foodId) || (e.barcode && f.barcode === e.barcode) || (f.name || '').toLowerCase() === (e.name || '').toLowerCase());
-    if (lf) { lf.lastQty = e.qty; lf.lastUnit = e.unit; lf.lastGPerUom = e.gPerUom; lf.per100 = e.per100; lf.serving = e.serving; if (e.brand && !lf.brand) lf.brand = e.brand; await DB.putFood(lf); }
+    Object.assign(e, { name: d.name, brand: d.brand, per100: d.per100, serving: d.serving, unit: lu, gPerUom: glu, qty: Number(qtyIn.value) || 0, per });
+    if (lf) e.foodId = lf.id;   // link so future edits track this food even through a rename
+    await DB.putEntry(e);
+    // Edits to a food's details stick to the library (name, brand, nutrition, serving) so they
+    // don't revert on re-log. Other days you already logged keep their historical snapshot.
+    if (lf) {
+      if (d.name) lf.name = d.name;
+      lf.brand = d.brand; lf.per100 = e.per100; lf.serving = e.serving;
+      lf.lastQty = e.qty; lf.lastUnit = e.unit; lf.lastGPerUom = e.gPerUom;
+      if (e.image && !lf.image) lf.image = e.image;
+      await DB.putFood(lf);
+    }
     closeSheet(back); render();
   };
   back.querySelector('[data-close-foot]').onclick = () => closeSheet(back);
