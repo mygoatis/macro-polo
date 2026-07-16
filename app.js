@@ -1,5 +1,5 @@
 // app.js — Macro Polo main controller.
-const APP_VERSION = 'v1.48';
+const APP_VERSION = 'v1.49';
 import * as DB from './db.js';
 import { lineChart, attachScrub, resetScrubData } from './charts.js';
 import * as AI from './ai.js';
@@ -361,7 +361,7 @@ async function renderFood() {
     const sel = S.selection.has(e.id);
     listHTML += `<div class="entry ${sel ? 'sel' : ''}${e.id === enterId ? ' entry-enter' : ''}" data-act="entry" data-id="${e.id}">
       <button class="check" data-act="toggle" data-id="${e.id}">${sel ? svg('check') : ''}</button>
-      <div class="body"><div class="name">${esc(e.name)}${macroTick(unitModel(e).per100)}</div><div class="meta">${e.brand ? `<span class="brand">${esc(e.brand)}</span> · ` : ''}${esc(portionText(e))}</div></div>
+      <div class="body"><div class="name">${esc(e.name)}${macroTick(t)}</div><div class="meta">${e.brand ? `<span class="brand">${esc(e.brand)}</span> · ` : ''}${esc(portionText(e))}</div></div>
       <div class="entry-stats">
         <div class="es"><b>${K(t.carbs)}</b><small>C</small></div>
         <div class="es"><b>${K(t.protein)}</b><small>P</small></div>
