@@ -210,9 +210,10 @@ input, textarea, select { outline: none; }
   border: 1px solid var(--line); border-radius: 999px; padding: 7px 8px;
   box-shadow: 0 10px 30px rgba(0,0,0,0.5); width: max-content; max-width: calc(100% - 24px);
 }
-.selbar button { display: flex; align-items: center; gap: 6px; padding: 9px 14px; border-radius: 999px; font-weight: 600; font-size: 13.5px; color: var(--text); background: var(--bg-elev); }
+.selbar button { display: grid; place-items: center; width: 40px; height: 40px; padding: 0; border-radius: 999px; color: var(--text); background: var(--bg-elev); }
+.selbar button:active { transform: scale(0.94); }
 .selbar button.danger { color: var(--danger); }
-.selbar button svg { width: 16px; height: 16px; }
+.selbar button svg { width: 19px; height: 19px; }
 .selbar .count { color: var(--text-dim); align-self: center; padding: 0 6px 0 10px; font-size: 13px; }
 
 /* ---------- Buttons ---------- */

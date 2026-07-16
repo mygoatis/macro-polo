@@ -1,5 +1,5 @@
 // app.js — Macro Polo main controller.
-const APP_VERSION = 'v1.50';
+const APP_VERSION = 'v1.51';
 import * as DB from './db.js';
 import { lineChart, attachScrub, resetScrubData } from './charts.js';
 import * as AI from './ai.js';
@@ -54,9 +54,9 @@ function macrosValidate(n) {
   const c = Number(n?.carbs) || 0, p = Number(n?.protein) || 0, f = Number(n?.fat) || 0;
   if (kcal <= 0 || (c === 0 && p === 0 && f === 0)) return false;   // nothing to check against
   const { low, high } = macroCalRange(n);
-  // 7%, not 5%: USDA uses food-specific Atwater factors (meat protein is ~4.27/g), so the
-  // general 4/4/9 underestimates lean meat by ~5% and 5% would flag real chicken and salmon.
-  const tol = Math.max(0.07 * kcal, 4);                             // floor covers rounding on tiny foods
+  // 9%: USDA uses food-specific Atwater factors (meat protein is ~4.27/g), so the general
+  // 4/4/9 underestimates lean meat by ~5%. Still flags anything off by 10% or more.
+  const tol = Math.max(0.09 * kcal, 4);                             // floor covers rounding on tiny foods
   return kcal >= low - tol && kcal <= high + tol;
 }
 const macroTick = (n) => (macrosValidate(n) ? svg('checkCircle', 'macro-ok') : '');
@@ -395,10 +395,10 @@ function renderSelbar() {
   if (S.tab !== 'food' || S.selection.size === 0) return;
   const bar = node(`<div class="selbar">
     <span class="count">${S.selection.size} selected</span>
-    <button data-act="sel-copy">${svg('copy')} Copy / move…</button>
-    ${S.selection.size > 1 ? `<button data-act="sel-dish">${svg('dish')} Save as dish</button>` : ''}
-    <button class="danger" data-act="sel-delete">${svg('trash')} Delete</button>
-    <button data-act="sel-clear">${svg('x')}</button>
+    <button data-act="sel-copy" title="Copy or move" aria-label="Copy or move">${svg('copy')}</button>
+    ${S.selection.size > 1 ? `<button data-act="sel-dish" title="Save as dish" aria-label="Save as dish">${svg('dish')}</button>` : ''}
+    <button class="danger" data-act="sel-delete" title="Delete" aria-label="Delete">${svg('trash')}</button>
+    <button data-act="sel-clear" title="Clear selection" aria-label="Clear selection">${svg('x')}</button>
   </div>`);
   document.body.appendChild(bar);
 }
