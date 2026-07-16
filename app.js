@@ -1,5 +1,5 @@
 // app.js — Macro Polo main controller.
-const APP_VERSION = 'v1.49';
+const APP_VERSION = 'v1.50';
 import * as DB from './db.js';
 import { lineChart, attachScrub, resetScrubData } from './charts.js';
 import * as AI from './ai.js';
@@ -95,7 +95,14 @@ function dayLabel(str) {
 function fullDate(str) { return new Date(str + 'T00:00:00').toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }); }
 
 // ---------------- Nutrition helpers ----------------
-function entryTotals(e) { const o = {}; for (const k of NUTRIENTS) o[k] = (e.per?.[k] || 0) * (e.qty || 0); return o; }
+// Totals come from the per-100g model, not the cached `per` field: the two can drift
+// (per is only a cache of per100 x gPerUom/100), and per100 is the source of truth.
+// For legacy entries with no per100, unitModel derives it from `per` and this round-trips.
+function entryTotals(e) {
+  const m = unitModel(e);
+  const o = {}; for (const k of NUTRIENTS) o[k] = (m.per100[k] || 0) * (m.gPerUom || 0) / 100 * (m.amount || 0);
+  return o;
+}
 function sumTotals(entries) { const o = {}; for (const k of NUTRIENTS) o[k] = 0; for (const e of entries) { const t = entryTotals(e); for (const k of NUTRIENTS) o[k] += t[k]; } return o; }
 function K(n) { return Math.round(n || 0); }
 function G(n) { return Math.round((n || 0) * 10) / 10; }
@@ -131,6 +138,7 @@ const I = {
   search: '<circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="m20 20-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
   sort: '<path d="M8 5v14M8 19l-3.5-3.5M8 19l3.5-3.5M16 19V5M16 5l-3.5 3.5M16 5l3.5 3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
   checkCircle: '<circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8 12.4l2.6 2.6L16 9.6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>',
+  dish: '<path d="M3.5 12.5a8.5 8.5 0 0 1 17 0Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M2.5 12.5h19M6 16.5h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
   info: '<circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 11.2v5M12 7.6v.9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
   spark: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8Z M19 14l.8 2.2L22 17l-2.2.8L19 20l-.8-2.2L16 17l2.2-.8Z" fill="currentColor"/>',
   chevL: '<path d="M15 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>',
@@ -388,6 +396,7 @@ function renderSelbar() {
   const bar = node(`<div class="selbar">
     <span class="count">${S.selection.size} selected</span>
     <button data-act="sel-copy">${svg('copy')} Copy / move…</button>
+    ${S.selection.size > 1 ? `<button data-act="sel-dish">${svg('dish')} Save as dish</button>` : ''}
     <button class="danger" data-act="sel-delete">${svg('trash')} Delete</button>
     <button data-act="sel-clear">${svg('x')}</button>
   </div>`);
@@ -665,6 +674,29 @@ async function migrateBarcodeFoods(onProgress) {
   return { foodsFixed, entriesFixed, failed };
 }
 
+// Rebuild the cached `per` (per one logged unit) from the authoritative per-100g model
+// wherever the two have drifted apart. Totals already ignore `per`, but the solver and
+// the scan preview still read it, so keep the stored data honest.
+async function repairPerCache() {
+  const rebuild = (o) => {
+    if (!o.per100 || !o.gPerUom) return false;
+    const per = {}; let changed = false;
+    for (const k of NUTRIENTS) {
+      per[k] = (o.per100[k] || 0) * o.gPerUom / 100;
+      if (Math.abs((o.per?.[k] || 0) - per[k]) > 0.01) changed = true;
+    }
+    if (changed) o.per = per;
+    return changed;
+  };
+  const entries = await DB.getAllEntries();
+  const dirty = entries.filter(rebuild);
+  if (dirty.length) await DB.putEntries(dirty);
+  const foods = await DB.getFoods();
+  let foodsFixed = 0;
+  for (const f of foods) if (rebuild(f)) { await DB.putFood(f); foodsFixed++; }
+  return { entriesFixed: dirty.length, foodsFixed };
+}
+
 // One-time: seed the library from previously-logged real foods (skip MFP day summaries).
 const LIB_SKIP = new Set(['regular', 'irregular', 'snacks', 'logged', 'breakfast', 'lunch', 'dinner']);
 async function backfillLibrary() {
@@ -688,10 +720,10 @@ async function backfillLibrary() {
 }
 
 // ---------------- Add-food sheet ----------------
-async function openAddFood() {
+async function openAddFood(initial = 'library') {
   const tabs = [['library', 'Library'], ['search', 'Search'], ['barcode', 'Scan'], ['photo', 'Photo'], ['manual', 'Manual']];
-  const tabSeg = tabs.map((t, i) => `<button class="${i === 0 ? 'active' : ''}" data-sub="${t[0]}">${t[1]}</button>`).join('');
-  const back = openSheet('Add food', `<div class="seg" id="subseg">${tabSeg}</div><div id="subcontent"></div>`, null, null, { full: true });
+  const tabSeg = tabs.map((t) => `<button class="${t[0] === initial ? 'active' : ''}" data-sub="${t[0]}">${t[1]}</button>`).join('');
+  const back = openSheet(pendingDish ? 'Save as dish' : 'Add food', `<div class="seg" id="subseg">${tabSeg}</div><div id="subcontent"></div>`, null, null, { full: true });
   const sub = back.querySelector('#subcontent');
   back.querySelector('#subseg').addEventListener('click', (e) => {
     const b = e.target.closest('button'); if (!b) return;
@@ -705,7 +737,24 @@ async function openAddFood() {
     else if (name === 'photo') subPhoto(sub, back);
     else if (name === 'manual') subManual(sub, back);
   }
-  loadSub('library');
+  loadSub(initial);
+}
+
+// Combine the selected foods into one dish: sum their nutrition and their real weight,
+// then hand it to the manual form to name and save. The ingredients stay logged as-is.
+let pendingDish = null;
+async function saveAsDish() {
+  const entries = await DB.getEntries(S.date);
+  const chosen = entries.filter((e) => S.selection.has(e.id));
+  if (chosen.length < 2) { toast('Select at least two foods'); return; }
+  const tot = sumTotals(chosen);
+  let grams = 0;
+  for (const e of chosen) { const m = unitModel(e); grams += (m.amount || 0) * (m.gPerUom || 0); }
+  if (!(grams > 0)) grams = 100;
+  const per100 = {}; for (const k of NUTRIENTS) per100[k] = tot[k] * 100 / grams;
+  pendingDish = { name: '', brand: '', unit: 'serving', per100, gPerUom: grams, serving: { amt: 1, unit: 'serving', gpu: grams }, count: chosen.length };
+  S.selection.clear(); render();
+  openAddFood('manual');
 }
 
 const LIB_SORTS = {
@@ -887,13 +936,22 @@ function subPhoto(host, back) {
 }
 
 function subManual(host, back) {
-  host.innerHTML = entryForm({ name: '', unit: 'serving', per100: emptyPer(), gPerUom: 100, serving: { amt: 1, unit: 'serving', gpu: 100 } })
-    + `<button class="btn primary block" id="madd" style="margin-top:12px">Add food</button>`;
+  const dish = pendingDish; pendingDish = null;          // consume the preset, if any
+  const seed = dish || { name: '', unit: 'serving', per100: emptyPer(), gPerUom: 100, serving: { amt: 1, unit: 'serving', gpu: 100 } };
+  host.innerHTML = (dish ? `<div class="dish-note">${svg('info')} Combined from ${dish.count} foods. Name it and save — the originals stay logged.</div>` : '')
+    + entryForm(seed)
+    + `<button class="btn primary block" id="madd" style="margin-top:12px">${dish ? 'Save dish to library' : 'Add food'}</button>`;
   wireServingForm(host);
   host.querySelector('#madd').onclick = async () => {
     const data = readEntryForm(host);
     if (!data.name) { toast('Name required'); return; }
-    await addEntry({ name: data.name, brand: data.brand, unit: data.unit, qty: data.qty, per: data.per, per100: data.per100, gPerUom: data.gPerUom, serving: data.serving }); closeSheet(back);
+    if (dish) {
+      // Library-only: logging it too would double-count the ingredients already on the day.
+      await ensureLibrary({ name: data.name, brand: data.brand, unit: data.unit, per: data.per, qty: data.qty, per100: data.per100, gPerUom: data.gPerUom, serving: data.serving });
+      closeSheet(back); toast(`Saved “${data.name}” to your library`); render();
+    } else {
+      await addEntry({ name: data.name, brand: data.brand, unit: data.unit, qty: data.qty, per: data.per, per100: data.per100, gPerUom: data.gPerUom, serving: data.serving }); closeSheet(back);
+    }
   };
 }
 
@@ -1482,8 +1540,19 @@ async function openSettings() {
     <input type="file" id="importfile" accept="application/json,.json" style="display:none">
     <button class="btn sm block" id="setfix" style="margin-top:8px">Fix scanned foods</button>
     <div class="faint" style="font-size:12px;margin-top:6px">Re-fetches barcode-scanned foods from Open Food Facts and corrects their brand and per-unit nutrition. Totals stay the same.</div>
+    <button class="btn sm block" id="setrepair" style="margin-top:8px">Repair food data</button>
+    <div class="faint" style="font-size:12px;margin-top:6px">Rebuilds stale per-unit nutrition from each food's per-100g values. Fixes items whose macros looked right but were stored inconsistently.</div>
     <button class="faint center" id="setver" style="font-size:12px;margin-top:14px;width:100%;background:none">Macro Polo ${APP_VERSION} · tap to force update</button>
   `, `<button class="btn ghost" data-close-foot>Cancel</button><button class="btn primary" id="setsave">Save</button>`);
+  back.querySelector('#setrepair').onclick = async () => {
+    const btn = back.querySelector('#setrepair'); btn.disabled = true; btn.textContent = 'Repairing…';
+    try {
+      const r = await repairPerCache();
+      toast(r.entriesFixed || r.foodsFixed ? `Repaired ${r.entriesFixed} logged, ${r.foodsFixed} saved` : 'Nothing needed repair');
+      render();
+    } catch { toast('Repair failed'); }
+    finally { btn.disabled = false; btn.textContent = 'Repair food data'; }
+  };
   back.querySelector('#setfix').onclick = async () => {
     const btn = back.querySelector('#setfix'); btn.disabled = true; btn.textContent = 'Fixing…';
     try {
@@ -1593,6 +1662,7 @@ document.addEventListener('click', async (e) => {
     case 'entry': openEntryDetail(t.dataset.id); break;
     case 'toggle': { if (lpFired) { lpFired = false; break; } const id = t.dataset.id; S.selection.has(id) ? S.selection.delete(id) : S.selection.add(id); render(); break; }
     case 'sel-copy': openCopySelected(); break;
+    case 'sel-dish': await saveAsDish(); break;
     case 'sel-delete': await deleteSelected(); break;
     case 'sel-clear': S.selection.clear(); render(); break;
     case 'select-all': { const es = await DB.getEntries(S.date); const all = es.length && es.every((e) => S.selection.has(e.id)); if (all) S.selection.clear(); else es.forEach((e) => S.selection.add(e.id)); render(); break; }
