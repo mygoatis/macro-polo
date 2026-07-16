@@ -1,5 +1,5 @@
 // app.js — Macro Polo main controller.
-const APP_VERSION = 'v1.51';
+const APP_VERSION = 'v1.52';
 import * as DB from './db.js';
 import { lineChart, attachScrub, resetScrubData } from './charts.js';
 import * as AI from './ai.js';
@@ -938,7 +938,7 @@ function subPhoto(host, back) {
 function subManual(host, back) {
   const dish = pendingDish; pendingDish = null;          // consume the preset, if any
   const seed = dish || { name: '', unit: 'serving', per100: emptyPer(), gPerUom: 100, serving: { amt: 1, unit: 'serving', gpu: 100 } };
-  host.innerHTML = (dish ? `<div class="dish-note">${svg('info')} Combined from ${dish.count} foods. Name it and save — the originals stay logged.</div>` : '')
+  host.innerHTML = (dish ? `<div class="dish-note">${svg('info')} Combined from ${dish.count} foods.</div>` : '')
     + entryForm(seed)
     + `<button class="btn primary block" id="madd" style="margin-top:12px">${dish ? 'Save dish to library' : 'Add food'}</button>`;
   wireServingForm(host);
