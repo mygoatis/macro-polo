@@ -1,5 +1,5 @@
 // app.js — Macro Polo main controller.
-const APP_VERSION = 'v1.47';
+const APP_VERSION = 'v1.48';
 import * as DB from './db.js';
 import { lineChart, attachScrub, resetScrubData } from './charts.js';
 import * as AI from './ai.js';
@@ -39,6 +39,27 @@ const MASS_UNITS = new Set(['g', 'oz', 'lb', 'mg', 'kg']);
 const UOM_LIST = ['g', 'oz', 'ml', 'cup', 'tbsp', 'tsp', 'serving', 'piece', 'slice'];
 // Quick multipliers under the amount stepper — each scales the current amount.
 const MULTIPLIERS = [['⅓', 1 / 3], ['½', 0.5], ['⅔', 2 / 3], ['1.5', 1.5], ['2', 2], ['3', 3]];
+
+// Macro-vs-calorie sanity check using Atwater factors (carbs 4, protein 4, fat 9).
+// US labels fold fiber into total carbs, but fiber only yields ~2 cal/g and makers
+// aren't consistent about it — so accept a band between counting fiber at 4 and at 2.
+function macroCalRange(n) {
+  const c = Number(n.carbs) || 0, p = Number(n.protein) || 0, f = Number(n.fat) || 0;
+  const fib = Math.min(Math.max(Number(n.fiber) || 0, 0), c);
+  const high = 4 * c + 4 * p + 9 * f;
+  return { low: Math.max(0, high - 2 * fib), high };
+}
+function macrosValidate(n) {
+  const kcal = Number(n?.kcal) || 0;
+  const c = Number(n?.carbs) || 0, p = Number(n?.protein) || 0, f = Number(n?.fat) || 0;
+  if (kcal <= 0 || (c === 0 && p === 0 && f === 0)) return false;   // nothing to check against
+  const { low, high } = macroCalRange(n);
+  // 7%, not 5%: USDA uses food-specific Atwater factors (meat protein is ~4.27/g), so the
+  // general 4/4/9 underestimates lean meat by ~5% and 5% would flag real chicken and salmon.
+  const tol = Math.max(0.07 * kcal, 4);                             // floor covers rounding on tiny foods
+  return kcal >= low - tol && kcal <= high + tol;
+}
+const macroTick = (n) => (macrosValidate(n) ? svg('checkCircle', 'macro-ok') : '');
 function uomOptions(sel) {
   const inList = UOM_LIST.includes(sel);
   return UOM_LIST.map((u) => `<option value="${u}" ${u === sel ? 'selected' : ''}>${u}</option>`).join('')
@@ -109,6 +130,8 @@ const I = {
   barcode: '<path d="M4 6v12M7 6v12M10 6v12M13 6v12M16 6v12M20 6v12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
   search: '<circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="m20 20-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
   sort: '<path d="M8 5v14M8 19l-3.5-3.5M8 19l3.5-3.5M16 19V5M16 5l-3.5 3.5M16 5l3.5 3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+  checkCircle: '<circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8 12.4l2.6 2.6L16 9.6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>',
+  info: '<circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 11.2v5M12 7.6v.9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
   spark: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8Z M19 14l.8 2.2L22 17l-2.2.8L19 20l-.8-2.2L16 17l2.2-.8Z" fill="currentColor"/>',
   chevL: '<path d="M15 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>',
   chevR: '<path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>',
@@ -338,7 +361,7 @@ async function renderFood() {
     const sel = S.selection.has(e.id);
     listHTML += `<div class="entry ${sel ? 'sel' : ''}${e.id === enterId ? ' entry-enter' : ''}" data-act="entry" data-id="${e.id}">
       <button class="check" data-act="toggle" data-id="${e.id}">${sel ? svg('check') : ''}</button>
-      <div class="body"><div class="name">${esc(e.name)}</div><div class="meta">${e.brand ? `<span class="brand">${esc(e.brand)}</span> · ` : ''}${esc(portionText(e))}</div></div>
+      <div class="body"><div class="name">${esc(e.name)}${macroTick(unitModel(e).per100)}</div><div class="meta">${e.brand ? `<span class="brand">${esc(e.brand)}</span> · ` : ''}${esc(portionText(e))}</div></div>
       <div class="entry-stats">
         <div class="es"><b>${K(t.carbs)}</b><small>C</small></div>
         <div class="es"><b>${K(t.protein)}</b><small>P</small></div>
@@ -711,7 +734,7 @@ async function subLibrary(host, back) {
       const gpu = MASS_UNITS.has((unit || '').toLowerCase()) ? UNIT_G[(unit || '').toLowerCase()] : (f.lastGPerUom || m.gPerUom || 100);
       const kcal = Math.round((m.per100.kcal || 0) * gpu / 100 * amt);
       return `<div class="list-item food-add" data-fid="${f.id}" style="margin-bottom:8px">
-      <div class="fa-name">${f.image ? `<img class="lib-thumb" src="${esc(f.image)}" alt="">` : ''}${esc(f.name)}${f.brand ? ` · <span class="faint">${esc(f.brand)}</span>` : ''}</div>
+      <div class="fa-name">${f.image ? `<img class="lib-thumb" src="${esc(f.image)}" alt="">` : ''}${esc(f.name)}${f.brand ? ` · <span class="faint">${esc(f.brand)}</span>` : ''}${macroTick(m.per100)}</div>
       <div class="fa-ctrls">
         <span class="fa-meta">${kcal} cal</span>
         <input class="qty-mini" data-qty inputmode="decimal" value="${G(amt)}"><span class="uom">${esc(unit)}</span>
@@ -751,7 +774,7 @@ function subSearch(host) {
           const kcal = Math.round((f.per100.kcal || 0) * f.gPerUom / 100 * f.amount);
           const sub = f.servingLabel ? ` <span class="faint" style="font-size:12px">(${esc(f.servingLabel)})</span>` : '';
           return `<div class="list-item food-add" data-i="${i}" style="margin-bottom:8px">
-          <div class="fa-name">${esc(f.name)}${f.brand ? ` · <span class="faint">${esc(f.brand)}</span>` : ''}</div>
+          <div class="fa-name">${esc(f.name)}${f.brand ? ` · <span class="faint">${esc(f.brand)}</span>` : ''}${macroTick(f.per100)}</div>
           <div class="fa-ctrls">
             <span class="fa-meta">${kcal} cal${sub}</span>
             <input class="qty-mini" data-qty inputmode="decimal" value="${G(f.amount)}"><span class="uom">${esc(f.unit)}</span>
@@ -905,18 +928,33 @@ function entryForm(e) {
     <datalist id="uomlist">${UOM_LIST.map((u) => `<option value="${u}">`).join('')}</datalist>
     <div class="section-title" style="margin-top:12px">Nutrition per serving</div>
     <div class="grid-2">${f('kcal')}${f('protein')}${f('carbs')}${f('fat')}</div>
-    <div class="grid-3" style="margin-top:10px">${f('sodium')}${f('fiber')}${f('sugar')}</div>`;
+    <div class="grid-3" style="margin-top:10px">${f('sodium')}${f('fiber')}${f('sugar')}</div>
+    <div class="macro-check" id="macrochk"></div>`;
+}
+// Live "do the macros add up to the calories?" readout under the nutrition fields.
+function updateMacroCheck(root) {
+  const el = root.querySelector('#macrochk'); if (!el) return;
+  const num = (k) => Number(root.querySelector(`[data-f="${k}"]`)?.value) || 0;
+  const n = { kcal: num('kcal'), carbs: num('carbs'), protein: num('protein'), fat: num('fat'), fiber: num('fiber') };
+  if (n.kcal <= 0 || (n.carbs === 0 && n.protein === 0 && n.fat === 0)) { el.innerHTML = ''; return; }
+  if (macrosValidate(n)) { el.innerHTML = `<span class="mc ok">${svg('checkCircle')} Macros match calories</span>`; return; }
+  const { low, high } = macroCalRange(n);
+  el.innerHTML = `<span class="mc off">${svg('info')} Macros suggest about ${K((low + high) / 2)} cal</span>`;
 }
 // Show/hide the "weighs" field (only non-weight units need it) and keep its label in sync.
 function wireServingForm(root) {
-  const uomEl = root.querySelector('[data-f="uom"]'); if (!uomEl) return;
-  const sync = () => {
-    const u = (uomEl.value || '').trim().toLowerCase();
-    const wf = root.querySelector('.weighs-field'); const lbl = root.querySelector('.weighs-unit');
-    if (wf) wf.classList.toggle('hidden', MASS_UNITS.has(u));
-    if (lbl) lbl.textContent = uomEl.value.trim() || 'unit';
-  };
-  uomEl.addEventListener('input', sync); uomEl.addEventListener('change', sync);
+  const uomEl = root.querySelector('[data-f="uom"]');
+  if (uomEl) {
+    const sync = () => {
+      const u = (uomEl.value || '').trim().toLowerCase();
+      const wf = root.querySelector('.weighs-field'); const lbl = root.querySelector('.weighs-unit');
+      if (wf) wf.classList.toggle('hidden', MASS_UNITS.has(u));
+      if (lbl) lbl.textContent = uomEl.value.trim() || 'unit';
+    };
+    uomEl.addEventListener('input', sync); uomEl.addEventListener('change', sync);
+  }
+  NUTRIENTS.forEach((k) => root.querySelector(`[data-f="${k}"]`)?.addEventListener('input', () => updateMacroCheck(root)));
+  updateMacroCheck(root);
 }
 // Read the serving-based form into a storable model (per-100g internally).
 function readEntryForm(root, qtyOverride) {
