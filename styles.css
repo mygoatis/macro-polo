@@ -128,12 +128,16 @@ input, textarea, select { outline: none; }
 .screen { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
 
 /* Food tab: freeze the summary + Copy day / Add food, scroll only the food list.
-   Turns #app into a viewport-height column so the list is the sole scroll region. */
-body.tab-food #app { height: 100dvh; display: flex; flex-direction: column; padding-bottom: 0; }
+   Lock the page to the visible viewport (100dvh) so nothing but the list moves.
+   The base rule sets #app min-height:100vh; 100vh > 100dvh while the address bar is
+   hidden, which would let the whole page drift, so clear it here. */
+body.tab-food { overflow: hidden; height: 100dvh; }
+body.tab-food #app { height: 100dvh; min-height: 0; display: flex; flex-direction: column; padding-bottom: 0; }
 body.tab-food .food-screen { flex: 1; min-height: 0; padding-bottom: 0; }
 body.tab-food .food-screen > :not(.food-list) { flex: none; }
 body.tab-food .food-list {
   flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;                      /* no bounce chaining to the page */
   padding-bottom: calc(80px + var(--safe-bottom));   /* clear the fixed tabbar */
   scrollbar-width: none;                              /* Firefox: no scrollbar */
 }
