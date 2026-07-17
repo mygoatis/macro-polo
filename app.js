@@ -1,5 +1,5 @@
 // app.js — Macro Polo main controller.
-const APP_VERSION = 'v1.52';
+const APP_VERSION = 'v1.53';
 import * as DB from './db.js';
 import { lineChart, attachScrub, resetScrubData } from './charts.js';
 import * as AI from './ai.js';
@@ -267,6 +267,7 @@ async function render() {
   else if (S.tab === 'body') bodyHTML = await renderBody();
   else if (S.tab === 'charts') bodyHTML = await renderCharts();
   $app.innerHTML = header() + bodyHTML + tabbar();
+  document.body.classList.toggle('tab-food', S.tab === 'food');   // enables the frozen-list layout
   renderSelbar();
   saveUI();
   if (S.tab === 'food' && foodAnim && foodAnim.animate) {
@@ -386,7 +387,7 @@ async function renderFood() {
     setTimeout(() => toast('Tip: hold a checkbox to select all'), 500);
   }
 
-  return `<div class="screen${slideCls}">${summary}${actions}<div>${listHTML}</div></div>`;
+  return `<div class="screen food-screen${slideCls}">${summary}${actions}<div class="food-list">${listHTML}</div></div>`;
 }
 
 function renderSelbar() {

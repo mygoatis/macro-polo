@@ -126,6 +126,18 @@ input, textarea, select { outline: none; }
 
 /* ---------- Generic layout ---------- */
 .screen { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+
+/* Food tab: freeze the summary + Copy day / Add food, scroll only the food list.
+   Turns #app into a viewport-height column so the list is the sole scroll region. */
+body.tab-food #app { height: 100dvh; display: flex; flex-direction: column; padding-bottom: 0; }
+body.tab-food .food-screen { flex: 1; min-height: 0; padding-bottom: 0; }
+body.tab-food .food-screen > :not(.food-list) { flex: none; }
+body.tab-food .food-list {
+  flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding-bottom: calc(80px + var(--safe-bottom));   /* clear the fixed tabbar */
+  scrollbar-width: none;                              /* Firefox: no scrollbar */
+}
+body.tab-food .food-list::-webkit-scrollbar { width: 0; height: 0; display: none; }
 .card {
   background: var(--bg-elev); border: 1px solid var(--line-soft);
   border-radius: var(--radius); padding: 16px;
