@@ -127,10 +127,18 @@ export async function searchFoods(query, apiKey) {
     .map((f) => {
       const per100 = usdaPer(f);
       // Branded foods carry a real serving size; raw/whole foods only have per-100g.
-      const ssUnit = (f.servingSizeUnit || '').toLowerCase();
-      let grams = (ssUnit === 'g' || ssUnit === 'ml') ? num(f.servingSize) : 0;
-      // Fall back to the grams inside the household label, e.g. "3/4 cup (20g)".
-      if (!grams && f.householdServingFullText) { const m = /([\d.]+)\s*g\b/i.exec(f.householdServingFullText); if (m) grams = num(m[1]); }
+      // USDA spells the serving unit inconsistently: g, GRM, ml, MLT. Anything else
+      // (e.g. IU) isn't a weight, so it can't give us grams.
+      const ssUnit = (f.servingSizeUnit || '').trim().toLowerCase();
+      const weighty = /^(g|gm|gr|grm|gram|grams|ml|mlt|milliliter|millilitre|milliliters|millilitres)$/.test(ssUnit);
+      let grams = weighty ? num(f.servingSize) : 0;
+      const hh = f.householdServingFullText || '';
+      if (!grams && hh) {
+        // Fall back to the household label: "3/4 cup (20g)", or an ounce serving like "2 ONZ".
+        const mg = /([\d.]+)\s*g\b/i.exec(hh);
+        if (mg) grams = num(mg[1]);
+        else { const mo = /([\d.]+)\s*(oz|onz|ounce)/i.exec(hh); if (mo) grams = num(mo[1]) * 28.3495; }
+      }
       const hasServing = grams > 0;
       const gPerUom = hasServing ? grams : 1;
       const unit = hasServing ? 'serving' : 'g';

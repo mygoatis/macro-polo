@@ -1,5 +1,5 @@
 // app.js — Macro Polo main controller.
-const APP_VERSION = 'v1.54';
+const APP_VERSION = 'v1.55';
 import * as DB from './db.js';
 import { lineChart, attachScrub, resetScrubData } from './charts.js';
 import * as AI from './ai.js';
@@ -236,6 +236,8 @@ let foodAnim = null;     // animation payload for the food afterRender hook
 let enterEntryId = null; // newly added entry id to animate in
 let pendingGain = 0;     // +cal amount to float up
 let dateDir = 0;         // -1 = previous day, +1 = next day
+let foodScroll = 0;      // food list scroll offset, kept across re-renders
+let renderedView = '';   // tab|date currently in the DOM, so we only keep scroll in place
 function haptic(ms) { try { if (navigator.vibrate) navigator.vibrate(ms || 8); } catch {} }
 function countUp(el, to, from) {
   if (!el) return; to = Math.round(to || 0); from = Math.round(from || 0);
@@ -266,7 +268,17 @@ async function render() {
   else if (S.tab === 'nutrients') bodyHTML = await renderNutrients();
   else if (S.tab === 'body') bodyHTML = await renderBody();
   else if (S.tab === 'charts') bodyHTML = await renderCharts();
+  // Keep the food list where it was across re-renders (selecting an item re-renders the
+  // whole screen, which would otherwise snap the list back to the top). Reset on a new day/tab.
+  const viewKey = S.tab + '|' + S.date;
+  const prevList = $app.querySelector('.food-list');
+  if (prevList) foodScroll = prevList.scrollTop;
+  const keepScroll = viewKey === renderedView;
+
   $app.innerHTML = header() + bodyHTML + tabbar();
+  renderedView = viewKey;
+  const newList = $app.querySelector('.food-list');
+  if (newList) newList.scrollTop = keepScroll ? foodScroll : 0;
   document.body.classList.toggle('tab-food', S.tab === 'food');   // enables the frozen-list layout
   renderSelbar();
   saveUI();
