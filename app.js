@@ -1,5 +1,5 @@
 // app.js — Macro Polo main controller.
-const APP_VERSION = 'v1.55';
+const APP_VERSION = 'v1.56';
 import * as DB from './db.js';
 import { lineChart, attachScrub, resetScrubData } from './charts.js';
 import * as AI from './ai.js';
@@ -238,6 +238,16 @@ let pendingGain = 0;     // +cal amount to float up
 let dateDir = 0;         // -1 = previous day, +1 = next day
 let foodScroll = 0;      // food list scroll offset, kept across re-renders
 let renderedView = '';   // tab|date currently in the DOM, so we only keep scroll in place
+
+// The tab bar's height varies by device (safe-area inset, system font scaling), so a
+// hard-coded reserve can clip the last row. Measure it and let the CSS pad by the real value.
+function measureTabbar() {
+  const tb = $app.querySelector('.tabbar'); if (!tb) return;
+  const h = Math.round(tb.getBoundingClientRect().height);
+  if (h > 0) document.documentElement.style.setProperty('--tabbar-h', h + 'px');
+}
+addEventListener('resize', measureTabbar);
+addEventListener('orientationchange', () => setTimeout(measureTabbar, 150));
 function haptic(ms) { try { if (navigator.vibrate) navigator.vibrate(ms || 8); } catch {} }
 function countUp(el, to, from) {
   if (!el) return; to = Math.round(to || 0); from = Math.round(from || 0);
@@ -280,6 +290,7 @@ async function render() {
   const newList = $app.querySelector('.food-list');
   if (newList) newList.scrollTop = keepScroll ? foodScroll : 0;
   document.body.classList.toggle('tab-food', S.tab === 'food');   // enables the frozen-list layout
+  measureTabbar();
   renderSelbar();
   saveUI();
   if (S.tab === 'food' && foodAnim && foodAnim.animate) {

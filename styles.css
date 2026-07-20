@@ -138,7 +138,9 @@ body.tab-food .food-screen > :not(.food-list) { flex: none; }
 body.tab-food .food-list {
   flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;                      /* no bounce chaining to the page */
-  padding-bottom: calc(80px + var(--safe-bottom));   /* clear the fixed tabbar */
+  /* Reserve the tab bar's measured height (set from JS) plus breathing room, so the last
+     row always clears it whatever the safe-area inset or system font size. */
+  padding-bottom: calc(var(--tabbar-h, 72px) + 28px);
   scrollbar-width: none;                              /* Firefox: no scrollbar */
 }
 body.tab-food .food-list::-webkit-scrollbar { width: 0; height: 0; display: none; }
