@@ -1,5 +1,5 @@
 // app.js — Macro Polo main controller.
-const APP_VERSION = 'v1.57';
+const APP_VERSION = 'v1.58';
 import * as DB from './db.js';
 import { lineChart, attachScrub, resetScrubData } from './charts.js';
 import * as AI from './ai.js';
@@ -60,6 +60,18 @@ function macrosValidate(n) {
   return kcal >= low - tol && kcal <= high + tol;
 }
 const macroTick = (n) => (macrosValidate(n) ? svg('checkCircle', 'macro-ok') : '');
+
+// Integer percentages that always sum to exactly 100 (largest-remainder / Hamilton method).
+// Rounding each share on its own can total 99 or 101, e.g. 50.7/24.65/24.65 -> 51/25/25.
+function macroPercents(mk) {
+  const keys = ['carbs', 'protein', 'fat'];
+  const sum = keys.reduce((s, k) => s + (mk[k] || 0), 0);
+  if (sum <= 0) return { carbs: 0, protein: 0, fat: 0 };
+  const parts = keys.map((k) => { const v = (mk[k] || 0) / sum * 100; return { k, floor: Math.floor(v), rem: v - Math.floor(v) }; });
+  let left = 100 - parts.reduce((s, p) => s + p.floor, 0);
+  parts.slice().sort((a, b) => b.rem - a.rem).forEach((p) => { if (left > 0) { p.floor++; left--; } });
+  const out = {}; for (const p of parts) out[p.k] = p.floor; return out;
+}
 function uomOptions(sel) {
   const inList = UOM_LIST.includes(sel);
   return UOM_LIST.map((u) => `<option value="${u}" ${u === sel ? 'selected' : ''}>${u}</option>`).join('')
@@ -376,8 +388,9 @@ async function renderFood() {
 
   const mk = { carbs: totals.carbs * 4, protein: totals.protein * 4, fat: totals.fat * 9 };
   const mkSum = (mk.carbs + mk.protein + mk.fat) || 1;
+  const pcts = macroPercents(mk);   // integers that sum to exactly 100
   const chip = (k) => {
-    const g = K(totals[k]); const pct = Math.round(mk[k] / mkSum * 100);
+    const g = K(totals[k]); const pct = pcts[k];
     return `<div class="macro-chip"><span class="dot" style="background:${META[k].color}"></span>
     <div><div class="v"><span class="num" data-g="${g}" data-p="${pct}">${macroPct ? pct : g}</span><small>${macroPct ? '%' : 'g'}</small></div><div class="l">${META[k].label}</div></div></div>`;
   };
