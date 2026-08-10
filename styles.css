@@ -455,7 +455,8 @@ body.anim .cal-float { animation: mp-float 1s ease forwards; }
 .cal-lbl { color: var(--text-faint); font-weight: 600; font-size: 14px; }
 .macro-seg { display: flex; height: 10px; border-radius: 6px; overflow: hidden; background: var(--line); margin: 12px 0 0; }
 .macro-seg > i { display: block; height: 100%; }
-.macro-chips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+.macro-chips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; cursor: pointer; border-radius: 12px; -webkit-tap-highlight-color: transparent; }
+.macro-chips:active { opacity: 0.55; }
 .macro-chip { display: flex; align-items: center; gap: 8px; justify-content: center; background: var(--bg-elev-2); border-radius: var(--radius-sm); padding: 10px 6px; }
 .macro-chip .v { font-size: 18px; font-weight: 730; letter-spacing: -0.02em; }
 .macro-chip .v small { font-size: 11px; color: var(--text-faint); font-weight: 600; }

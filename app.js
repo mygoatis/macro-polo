@@ -1,5 +1,5 @@
 // app.js — Macro Polo main controller.
-const APP_VERSION = 'v1.56';
+const APP_VERSION = 'v1.57';
 import * as DB from './db.js';
 import { lineChart, attachScrub, resetScrubData } from './charts.js';
 import * as AI from './ai.js';
@@ -232,6 +232,7 @@ function initSwipe() {
 let animOn = true;       // animations enabled (user setting, default on)
 function setAnim(on) { animOn = !!on; document.body.classList.toggle('anim', animOn); }
 let foodPrev = null;     // previous food totals (for count-up)
+let macroPct = false;    // summary macro chips show % of calories instead of grams
 let foodAnim = null;     // animation payload for the food afterRender hook
 let enterEntryId = null; // newly added entry id to animate in
 let pendingGain = 0;     // +cal amount to float up
@@ -296,8 +297,10 @@ async function render() {
   if (S.tab === 'food' && foodAnim && foodAnim.animate) {
     const fa = foodAnim;
     countUp($app.querySelector('.cal-num'), fa.totals.kcal, fa.prev.kcal);
-    const nums = $app.querySelectorAll('.macro-chip .num');
-    ['carbs', 'protein', 'fat'].forEach((k, i) => countUp(nums[i], fa.totals[k], fa.prev[k]));
+    if (!macroPct) {   // in % mode the chips already render the right value; don't count up to grams
+      const nums = $app.querySelectorAll('.macro-chip .num');
+      ['carbs', 'protein', 'fat'].forEach((k, i) => countUp(nums[i], fa.totals[k], fa.prev[k]));
+    }
     requestAnimationFrame(() => $app.querySelectorAll('.macro-seg.grow > i').forEach((el) => { el.style.width = el.dataset.w + '%'; }));
     if (pendingGain > 0) floatGain(pendingGain);
   }
@@ -371,15 +374,18 @@ async function renderFood() {
   const enterId = enterEntryId; enterEntryId = null;
   const slideCls = dateDir > 0 ? ' slide-next' : dateDir < 0 ? ' slide-prev' : ''; dateDir = 0;
 
-  const chip = (k) => `<div class="macro-chip"><span class="dot" style="background:${META[k].color}"></span>
-    <div><div class="v"><span class="num">${K(totals[k])}</span><small>g</small></div><div class="l">${META[k].label}</div></div></div>`;
   const mk = { carbs: totals.carbs * 4, protein: totals.protein * 4, fat: totals.fat * 9 };
   const mkSum = (mk.carbs + mk.protein + mk.fat) || 1;
+  const chip = (k) => {
+    const g = K(totals[k]); const pct = Math.round(mk[k] / mkSum * 100);
+    return `<div class="macro-chip"><span class="dot" style="background:${META[k].color}"></span>
+    <div><div class="v"><span class="num" data-g="${g}" data-p="${pct}">${macroPct ? pct : g}</span><small>${macroPct ? '%' : 'g'}</small></div><div class="l">${META[k].label}</div></div></div>`;
+  };
   const seg = (k) => { const pct = (mk[k] / mkSum) * 100; return `<i data-w="${pct}" style="width:${animate ? 0 : pct}%;background:${META[k].color}"></i>`; };
   const summary = `<div class="card">
     <div class="cal-top"><span class="cal-num">${K(totals.kcal)}</span><span class="cal-lbl">cal</span></div>
     <div class="macro-seg${animate ? ' grow' : ''}">${seg('carbs')}${seg('protein')}${seg('fat')}</div>
-    <div class="macro-chips">${chip('carbs')}${chip('protein')}${chip('fat')}</div>
+    <div class="macro-chips" data-act="toggle-macro" title="Tap to switch grams / % of calories">${chip('carbs')}${chip('protein')}${chip('fat')}</div>
   </div>`;
 
   const actions = `<div class="quick-actions">
@@ -1685,6 +1691,14 @@ document.addEventListener('click', async (e) => {
     case 'copy-day': openCopyDay(); break;
     case 'entry': openEntryDetail(t.dataset.id); break;
     case 'toggle': { if (lpFired) { lpFired = false; break; } const id = t.dataset.id; S.selection.has(id) ? S.selection.delete(id) : S.selection.add(id); render(); break; }
+    case 'toggle-macro': {
+      macroPct = !macroPct; haptic(6);
+      $app.querySelectorAll('.macro-chips .macro-chip .num').forEach((num) => {
+        num.textContent = macroPct ? num.dataset.p : num.dataset.g;
+        const u = num.nextElementSibling; if (u) u.textContent = macroPct ? '%' : 'g';
+      });
+      break;
+    }
     case 'sel-copy': openCopySelected(); break;
     case 'sel-dish': await saveAsDish(); break;
     case 'sel-delete': await deleteSelected(); break;
