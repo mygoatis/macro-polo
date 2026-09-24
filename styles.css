@@ -133,8 +133,9 @@ input, textarea, select { outline: none; }
    hidden, which would let the whole page drift, so clear it here. */
 body.tab-food { overflow: hidden; height: 100dvh; }
 body.tab-food #app { height: 100dvh; min-height: 0; display: flex; flex-direction: column; padding-bottom: 0; }
-body.tab-food .food-screen { flex: 1; min-height: 0; padding-bottom: 0; }
+body.tab-food .food-screen { flex: 1; min-height: 0; padding-top: 8px; padding-bottom: 0; gap: 7px; }   /* half of .screen's 16px / 14px */
 body.tab-food .food-screen > :not(.food-list) { flex: none; }
+body.tab-food .food-list .entry { margin-bottom: 4px; }                                                   /* half of .entry's 8px */
 body.tab-food .food-list {
   flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;                      /* no bounce chaining to the page */
